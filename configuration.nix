@@ -42,7 +42,7 @@
     enable = true;
     settings = {
       default_session = {
-        command = "${pkgs.greetd.tuigreet}/bin/tuigreet --time --cmd river";
+        command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd river";
       };
     };
   };
@@ -80,7 +80,7 @@
      kitty
      git
      curl
-     river
+     river-classic
      wofi
      mako
      wl-clipboard
@@ -100,7 +100,8 @@
   ];
 
   fonts.packages = with pkgs; [
-    (nerdfonts.override { fonts = [ "FiraCode" "Hack" ]; })
+    (nerd-fonts.fira-code)
+    (nerd-fonts.hack)
   ];
 
   # Some programs need SUID wrappers, can be configured further or are
@@ -151,7 +152,7 @@
 
   nixpkgs.config.allowUnfree = true;
   
-  programs.river.enable = true;
+  programs.river-classic.enable = true;
   programs.waybar.enable = true;
   programs.dconf.enable = true;
 
