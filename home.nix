@@ -46,7 +46,7 @@
   programs.bash = {
     enable = true;
     shellAliases = {
-      nrs = "sudo nixos-rebuild switch";
+      nrs = "sudo nixos-rebuild switch --flake .#node1";
       ll = "ls -alh";
       hms = "home-manager switch";
     };
