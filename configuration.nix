@@ -131,6 +131,8 @@
 
   hardware.bluetooth.enable = true;
   hardware.bluetooth.powerOnBoot = true;
+
+  hardware.trackpoint.enable = false;
   
   security.polkit.enable = true;
   
