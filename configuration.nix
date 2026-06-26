@@ -25,7 +25,7 @@
   # Change both or dont change! 
   networking.hostName = "node1"; 
 
-  # Připojení k síti přes čisté IWD (bez NetworkManageru)
+  # Pure IWD (No NetworkManageru, as god intended)
   networking.wireless.iwd.enable = true;
 
   # Sets the timezone
@@ -34,7 +34,8 @@
   # Select internationalisation properties.
   i18n.defaultLocale = "en_US.UTF-8";
 
-  # Povolení správce přihlášení (greetd) s automatickým startem do Swaye
+  # Greetd - display manager for the greeter, tuigreet is a TUI login screen
+  # Autolaunch sway once loged in
   services.greetd = {
     enable = true;
     settings = {
@@ -44,13 +45,13 @@
     };
   };
   
-  # Povolení jádra Swaye na systémové úrovni
+  # Allows the core of Sway on the system level
   programs.sway = {
     enable = true;
-    wrapperFeatures.gtk = true; # Správné načítání GTK témat (např. Adwaita)
+    wrapperFeatures.gtk = true; # For the correct implementation of GTK themes (.. Adwaita..)
   };
 
-  # Portály pro bezproblémové sdílení obrazovky (např. v Discordu/prohlížeči)
+  # Portals for screen sharing (Discord/Browser)
   xdg.portal = {
     enable = true;
     wlr.enable = true;
@@ -61,7 +62,7 @@
   # Enable CUPS to print documents.
   services.printing.enable = true;
 
-  # Moderní zvukový server PipeWire
+  # Sound..
   services.pipewire = {
      enable = true;
      pulse.enable = true;
@@ -69,14 +70,14 @@
   
   services.libinput.enable = true;
 
-  # Nastavení uživatele Rafi
+  # USER settings - Rafi
   users.users.rafi = {
      isNormalUser = true;
      extraGroups = [ "wheel" "video" "audio" "input" ];
      packages = with pkgs; [ ];
   };
 
-  # Systémové balíčky (Zde zůstává jen základní softwarová výbava a TUI nástroje)
+  # Sys. packages (ideally only basic SW and TUI tools)
   environment.systemPackages = with pkgs; [
      vim 
      wget
@@ -106,6 +107,7 @@
     (nerd-fonts.hack)
   ];
 
+  # BT..
   hardware.bluetooth.enable = true;
   hardware.bluetooth.powerOnBoot = true;
 
@@ -116,7 +118,7 @@
   services.udisks2.enable = true;
   zramSwap.enable = true;
 
-  # TLP nastavení baterie pro tvůj Lenovo notebook
+  # TLP battery setting for the dual battery T480
   services.tlp = {
     enable = true;
     settings = {
