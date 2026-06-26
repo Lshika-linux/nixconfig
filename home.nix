@@ -13,6 +13,7 @@
   # 1. Uživatelské balíčky spravované přes Home Manager
   home.packages = with pkgs; [
     swaybg
+    termdown
     obsidian
     wlogout
     fastfetch
@@ -181,7 +182,7 @@
         { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
         { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
         { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-        { command = "floating enable, sticky enable, resize set 350 65, move position 15 45, border pixel 4"; criteria = { class = "PomodoroTimer"; }; }
+		{ command = "floating enable, sticky enable, resize set 100 50, move position 15 45, border pixel 4"; criteria = { app_id = "PomodoroTimer"; }; }
       ];
 
       # Kompletní klávesové zkratky (Včetně tvého směrového 'uring')
@@ -202,6 +203,7 @@
         #"${mod}+Tab" = "exec python3 ~/.config/i3/scripts/switcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
         "${mod}+Shift+w" = "exec ~/scripts_sway/pomodoro_toggle.sh";
+		"${mod}+t" = "exec ~/scripts_sway/timer.sh";
 
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";
@@ -376,6 +378,16 @@ home.file."scripts_sway/screenshot.sh" = {
     esac
   '';
 };
+
+home.file."scripts_sway/timer.sh" = {
+  executable = true;
+  text = ''
+    #!/usr/bin/env bash
+    mins=$(echo "" | rofi -dmenu -p "⏱ Timer" -l 0 -theme-str 'window { location: north; anchor: north; width: 200px; y-offset: 20; border: 2px; border-color: #ffff00; border-radius: 8px; }')
+    [ -n "$mins" ] && alacritty --class PomodoroTimer -e termdown "$mins"m
+  '';
+};
+
 
   # Tvoje zachované aliasy
   programs.bash = {
