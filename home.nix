@@ -330,6 +330,39 @@ home.file."scripts_sway/powermenu.sh" = {
   '';
 };
 
+home.file."scripts_sway/lock.sh" = {
+  executable = true;
+  text = ''
+    #!/usr/bin/env bash
+
+    swaylock \
+      --screenshots \
+      --clock \
+      --indicator \
+      --indicator-radius 150 \
+      --indicator-thickness 13 \
+      --effect-blur 7x5 \
+      \
+      --timestr "%H:%M" \
+      --datestr "%A, %d. %B" \
+      \
+      --font "Ubuntu Bold" \
+      --font-size 28 \
+      \
+      --ring-color f2f2f2 \
+      --key-hl-color ffff00 \
+      --bs-hl-color ffff00 \
+      --inside-color 000000aa \
+      --ring-ver-color f2f2f2 \
+      --inside-ver-color 000000aa \
+      --ring-wrong-color ff0000 \
+      --inside-wrong-color f2f2f2 \
+      \
+      --text-color ffff00 \
+      --text-ver-color f2f2f2 \
+      --text-wrong-color ff0000
+  '';
+};
 
 
   # Tvoje zachované aliasy
