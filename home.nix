@@ -225,11 +225,13 @@
         # Multimediální klávesy a HW kontrola jasu/zvuku
         "XF86MonBrightnessUp"   = "exec brightnessctl set +10%";
         "XF86MonBrightnessDown" = "exec brightnessctl set 10%-";
-        "XF86AudioRaiseVolume"  = "exec ~/.config/i3/scripts/volume_notify.sh +5%";
-        "XF86AudioLowerVolume"  = "exec ~/.config/i3/scripts/volume_notify.sh -5%";
+        # Zatím neexistuje
+        "XF86AudioRaiseVolume"  = "exec ~/scripts_sway/scripts/volume_notify.sh +5%";
+        "XF86AudioLowerVolume"  = "exec ~/scripts_sway/scripts/volume_notify.sh -5%";
+        #
         "XF86AudioMute"         = "exec pactl set-sink-mute @DEFAULT_SINK@ toggle";
         "XF86AudioMicMute"      = "exec pactl set-source-mute @DEFAULT_SOURCE@ toggle";
-        "Print"                 = "exec ~/.config/i3/scripts/screenshot.sh";
+        "Print"                 = "exec ~/scripts_sway/screenshot.sh";
       };
 
       # Barevné schéma oken (Tvůj kontrast žluté a černé)
