@@ -192,7 +192,8 @@
         "${mod}+Shift+q" = "kill";
         "${mod}+Shift+c" = "reload";
         "${mod}+Shift+r" = "restart";
-        "${mod}+Shift+e" = "exec wlogout -l ~/.config/wlogout/layout -b 5";
+        "${mod}+Shift+e" = "exec ~/scripts_sway/powermenu.sh";
+#       "${mod}+Shift+e" = "exec wlogout -l ~/.config/wlogout/layout -b 5";
         "${mod}+Shift+x" = "exec ~/scripts_sway/lock.sh";
         "${mod}+Shift+S" = "exec alacritty -e ssh ratta@100.97.214.64";
 
@@ -302,6 +303,34 @@
     };
     gtk4.theme = null; # Zamlčí varování o změně výchozí hodnoty gtk4.theme
   };
+
+
+home.file."scripts_sway/powermenu.sh" = {
+  executable = true;
+  text = ''
+    #!/usr/bin/env bash
+    options="Lock\nShutdown\nReboot\nSleep\nLogout\nCancel"
+
+    chosen=$(
+      echo -e "$options" | rofi -dmenu \
+        -p "Power" \
+        -no-custom \
+        -lines 6  \
+        -theme-str 'listview { scrollbar: false; } inputbar { enabled: false; } listview { lines: 5; } window { width: 18em; }'
+    )
+
+    case "$chosen" in
+        Lock) bash ~/scripts_sway/lock.sh ;;
+        Shutdown) systemctl poweroff ;;
+        Reboot) systemctl reboot ;;
+        Sleep) systemctl suspend ;;
+        Logout) swaymsg exit ;;
+        *) exit 0 ;;
+    esac
+  '';
+};
+
+
 
   # Tvoje zachované aliasy
   programs.bash = {
