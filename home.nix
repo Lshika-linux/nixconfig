@@ -242,7 +242,8 @@
         #
         "XF86AudioMute"         = "exec pactl set-sink-mute @DEFAULT_SINK@ toggle";
         "XF86AudioMicMute"      = "exec pactl set-source-mute @DEFAULT_SOURCE@ toggle";
-        "Print"                 = "exec ~/scripts_sway/screenshot.sh";
+		"Print" = "exec ~/scripts_sway/screenshot.sh";
+		"Shift+Print" = "exec ~/scripts_sway/screenshot.sh delay";
       };
 
       # Barevné schéma oken (Tvůj kontrast žluté a černé)
@@ -364,6 +365,17 @@ home.file."scripts_sway/lock.sh" = {
   '';
 };
 
+home.file."scripts_sway/screenshot.sh" = {
+  executable = true;
+  text = ''
+    #!/usr/bin/env bash
+
+    case "$1" in
+      "delay") sleep 3 && grim -g "$(slurp)" - | wl-copy ;;
+      *)       grim -g "$(slurp)" - | wl-copy ;;
+    esac
+  '';
+};
 
   # Tvoje zachované aliasy
   programs.bash = {
