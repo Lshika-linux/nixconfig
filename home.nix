@@ -135,7 +135,7 @@
           bg = "${./wallpapers/wallpaper.png} fill";
         };
       };
-      # ---------------------------
+     # ---------------------------
 
       # Vstupy a chování hardwaru (Touchpad a Trackpoint)
       input = {
@@ -263,7 +263,7 @@
           names = [ "Ubuntu" ];
           size = 13.0;
         };
-        statusCommand = "i3status";
+        statusCommand = "i3status -c ~/.config/i3status/config";
         position = "bottom";
         extraConfig = ''
           bindsym button1 exec alacritty --class "floating_impala" -e impala
