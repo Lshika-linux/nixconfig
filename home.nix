@@ -8,6 +8,7 @@
   # 1. Uživatelské balíčky spravované přes Home Manager
   home.packages = with pkgs; [
     swaybg
+    obsidian
     wlogout
     fastfetch
     alacritty
