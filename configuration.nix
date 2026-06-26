@@ -17,17 +17,18 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
   boot.plymouth.enable = true;
-  
-  # Pro to, aby se heslo k disku zadávalo v GUI:
+
+  # For disk encryption password in  GUI:
   boot.initrd.systemd.enable = true;
-  
-  # Sjednoceno s tvým aliasem .#node1 v home.nix, aby flake správně buildoval
+
+  # CAVE: Connected with the .#node1 alias in home.nix, REQUIRED FOR CORRECT BUILDING!
+  # Change both or dont change! 
   networking.hostName = "node1"; 
 
   # Připojení k síti přes čisté IWD (bez NetworkManageru)
   networking.wireless.iwd.enable = true;
 
-  # Set your time zone.
+  # Sets the timezone
   time.timeZone = "Europe/Prague";
 
   # Select internationalisation properties.
@@ -42,7 +43,7 @@
       };
     };
   };
-
+  
   # Povolení jádra Swaye na systémové úrovni
   programs.sway = {
     enable = true;
@@ -94,8 +95,8 @@
      firefox
      flameshot
      lxqt.lxqt-policykit
-     impala       # Tvoje Wi-Fi TUI
-     bluetuith    # Tvoje Bluetooth TUI
+     impala       # Wi-Fi TUI
+     bluetuith    # Bluetooth TUI
      htop
      steam
   ];
@@ -130,6 +131,6 @@
   nixpkgs.config.allowUnfree = true;
 
   programs.dconf.enable = true;
-
+  # CAVE: DONT TOUCH THIS VALUE IF YOU ARENT R E A L L Y SURE YOU WANT TO # 
   system.stateVersion = "24.11";
 }
