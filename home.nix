@@ -35,7 +35,7 @@
         font_size = "12.0";
         confirm_os_window_close = 0;
         foreground = "#cdd6f4";
-        background = "#1a1e2e";
+        background = "#1a1e2e";#282a36
         cursor     = "#c8848b";
   
         color0  = "#2e3a59";
@@ -247,7 +247,7 @@
       # Barevné schéma oken (Tvůj kontrast žluté a černé)
       colors = {
         focused = {
-          border = "#ffff00"; background = "#ffff00"; text = "#000000"; indicator = "#ffff00"; childBorder = "#ffff00";
+          border = "#282a36"; background = "#282a36"; text = "#ffffff"; indicator = "#282a36"; childBorder = "#282a36";
         };
         focusedInactive = {
           border = "#000000"; background = "#000000"; text = "#ffffff"; indicator = "#000000"; childBorder = "#000000";
@@ -271,17 +271,17 @@
           bindsym button1 exec alacritty --class "floating_impala" -e impala
         '';
         colors = {
-          background = "#000000";
+          background = "#282a36";
           statusline = "#ffffff";
-          separator = "#ffff00";
+          separator = "#666666";
           focusedWorkspace = {
-            border = "#ffffff"; background = "#ffffff"; text = "#000000";
+            border = "#ffffff"; background = "#282a36"; text = "#ffffff";
           };
           activeWorkspace = {
-            border = "#000000"; background = "#000000"; text = "#ffffff";
+            border = "#282a36"; background = "#282a36"; text = "#ffffff";
           };
           inactiveWorkspace = {
-            border = "#000000"; background = "#000000"; text = "#ffffff";
+            border = "#282a36"; background = "#282a36"; text = "#ffffff";
           };
           urgentWorkspace = {
             border = "#ff0000"; background = "#ff0000"; text = "#ffffff";
