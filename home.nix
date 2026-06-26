@@ -129,6 +129,14 @@
         size = 12.0;
       };
 
+     # ---- wallpaper ----
+      output = {
+        "*" = {
+          bg = "${./wallpapers/wallpaper.png} fill";
+        };
+      };
+      # ---------------------------
+
       # Vstupy a chování hardwaru (Touchpad a Trackpoint)
       input = {
         "type:keyboard" = {
