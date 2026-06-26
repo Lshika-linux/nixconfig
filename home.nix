@@ -8,7 +8,8 @@
   home.username = "rafi";
   home.homeDirectory = "/home/rafi";
   home.stateVersion = "24.11";
-
+  xdg.enable = true;
+  	
   # 1. Uživatelské balíčky spravované přes Home Manager
   home.packages = with pkgs; [
     swaybg
@@ -55,8 +56,9 @@
       colors = true;
       color_good = "#ffffff";
       color_degraded = "#ffff00";
-      color_bad = "#ff0000";
+      color_bad = "#ff0000";   
     };
+    
     modules = {
       "wireless _first_" = {
         position = 1;
@@ -263,7 +265,7 @@
           names = [ "Ubuntu" ];
           size = 13.0;
         };
-        statusCommand = "i3status -c ~/.config/i3status/config";
+        statusCommand = "i3status -c ${config.xdg.configFile."i3status/config".source}";
         position = "bottom";
         extraConfig = ''
           bindsym button1 exec alacritty --class "floating_impala" -e impala
