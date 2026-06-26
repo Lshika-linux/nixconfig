@@ -1,3 +1,7 @@
+###################################################################
+# flake.nix - here we declare where we pull packages from - INPUTS#
+############### .. and where to send them - OUTPUTS ###############
+###################################################################
 {
   description = "node1 NixOS config — rafi";
 

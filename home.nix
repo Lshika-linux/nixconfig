@@ -1,3 +1,7 @@
+#home.nix - here we declare packages for the user layer, generally no root requirement#
+# also the home for configs n such.. #
+
+
 { config, pkgs, ... }:
 
 {

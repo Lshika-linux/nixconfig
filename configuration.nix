@@ -1,3 +1,5 @@
+# configuration.nix - here we declare system level stuff - generally things that require root #
+
 # Edit this configuration file to define what should be installed on
 # your system.
 # Help is available in the configuration.nix(5) man page, on
