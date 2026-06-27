@@ -32,8 +32,8 @@
   programs.kitty = {
       enable = true;
       settings = {
-        background_opacity = "0.85";
-        font_size = "12.0";
+        background_opacity = "0.75";
+        font_size = "13.0";
         confirm_os_window_close = 0;
         foreground = "#cdd6f4";
         background = "#1a1e2e";#282a36
@@ -203,7 +203,7 @@
       keybindings = let 
         mod = "Mod4";
       in pkgs.lib.mkOptionDefault {
-        "${mod}+Return" = "exec alacritty";
+        "${mod}+Return" = "exec kitty";
         "${mod}+Shift+q" = "kill";
         "${mod}+Shift+c" = "reload";
         "${mod}+Shift+r" = "restart";
@@ -259,10 +259,9 @@
 		"Shift+Print" = "exec ~/scripts_sway/screenshot.sh delay";
       };
 
-      # Barevné schéma oken (Tvůj kontrast žluté a černé)
       colors = {
         focused = {
-          border = "#282a36"; background = "#282a36"; text = "#ffffff"; indicator = "#282a36"; childBorder = "#282a36";
+          border = "#ffffff"; background = "#ffffff"; text = "#ffffff"; indicator = "#ffffff"; childBorder = "#ffffff";
         };
         focusedInactive = {
           border = "#000000"; background = "#000000"; text = "#ffffff"; indicator = "#000000"; childBorder = "#000000";
@@ -323,13 +322,13 @@ home.file."scripts_sway/powermenu.sh" = {
   executable = true;
   text = ''
     #!/usr/bin/env bash
-    options="Lock\nShutdown\nReboot\nSleep\nLogout\nCancel"
+    options="Lock\nShutdown\nReboot\nSleep\nLogout"
 
     chosen=$(
       echo -e "$options" | rofi -dmenu \
         -p "Power" \
         -no-custom \
-        -lines 6  \
+        -lines 5  \
         -theme-str 'listview { scrollbar: false; } inputbar { enabled: false; } listview { lines: 5; } window { width: 18em; }'
     )
 
@@ -420,6 +419,66 @@ home.file.".config/wob/wob.ini".text = ''
 home.file."scripts_sway/meow.mp3".source = ./sounds/meow.mp3;
 home.file."scripts_sway/minecraftcat.mp3".source = ./sounds/minecraftcat.mp3;
 
+
+
+home.file.".config/rofi/config.rasi".text = ''
+  configuration {
+    modi: "drun,run";
+    show-icons: true;
+    drun-display-format: "{name}";
+    font: "Ubuntu Bold 13";
+    columns: 2;
+  }
+
+  @theme "/dev/null"
+
+  * {
+    background-color: #1a1e2e;
+    text-color: #ffffff;
+    border-color: #ffffff;
+  }
+
+  window {
+    width: 400px;
+    border: 2px;
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  inputbar {
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px;
+    border-color: #5b8dd9;
+    border-radius: 4px;
+  }
+
+  prompt {
+    text-color: #5b8dd9;
+    margin-right: 8px;
+  }
+
+  element {
+    padding: 6px 8px;
+    border-radius: 4px;
+  }
+
+  element selected {
+    background-color: #5b8dd9;
+    text-color: #1a1e2e;
+  }
+
+  element-text {
+    background-color: transparent;
+    text-color: inherit;
+  }
+
+  element-icon {
+    size: 20px;
+    background-color: transparent;
+  }
+'';
+
   # Tvoje zachované aliasy
   programs.bash = {
     enable = true;
@@ -427,6 +486,7 @@ home.file."scripts_sway/minecraftcat.mp3".source = ./sounds/minecraftcat.mp3;
       nrs = "sudo nixos-rebuild switch --flake .#node1";
       ll = "ls -alh";
       hms = "home-manager switch";
+      bt = "bluetuith";
     };
   };
 
