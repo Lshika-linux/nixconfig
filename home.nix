@@ -123,6 +123,11 @@
   # Kompletní konfigurace okenního manažeru Sway
   wayland.windowManager.sway = {
     enable = true;
+	extraConfig = ''
+	  titlebar_border_thickness 0
+	  titlebar_padding 0 0
+	  for_window [all] title_format " "
+	'';
     config = {
       modifier = "Mod4";
       terminal = "alacritty"; # Přesně podle tvého i3 nastavení
@@ -172,8 +177,15 @@
         smartGaps = true;
       };
 
-      window.border = 4;
-      floating.border = 4;
+	  window = {
+	    border = 4;
+	    titlebar = false;
+	  };
+	  floating = {
+	     border = 4;
+	     titlebar = false;
+	  };     
+
 
       # Pravidla chování pro specifická okna a TUI rozhraní
       window.commands = [
