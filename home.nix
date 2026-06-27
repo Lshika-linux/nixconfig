@@ -381,16 +381,16 @@ home.file."scripts_sway/lock.sh" = {
       --font "Ubuntu Bold" \
       --font-size 28 \
       \
-      --ring-color f2f2f2 \
-      --key-hl-color ffff00 \
-      --bs-hl-color ffff00 \
+      --ring-color ffffff \
+      --key-hl-color ffffff \
+      --bs-hl-color ffffff \
       --inside-color 000000aa \
-      --ring-ver-color f2f2f2 \
+      --ring-ver-color ffffff \
       --inside-ver-color 000000aa \
       --ring-wrong-color ff0000 \
       --inside-wrong-color f2f2f2 \
       \
-      --text-color ffff00 \
+      --text-color ffffff \
       --text-ver-color f2f2f2 \
       --text-wrong-color ff0000
   '';
