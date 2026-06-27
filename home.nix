@@ -128,6 +128,26 @@
 	  titlebar_border_thickness 0
 	  titlebar_padding 0 0
 	  for_window [all] title_format " "
+	  bindsym --to-code Mod4+1 workspace number 1
+	  bindsym --to-code Mod4+2 workspace number 2
+	  bindsym --to-code Mod4+3 workspace number 3
+	  bindsym --to-code Mod4+4 workspace number 4
+	  bindsym --to-code Mod4+5 workspace number 5
+	  bindsym --to-code Mod4+6 workspace number 6
+	  bindsym --to-code Mod4+7 workspace number 7
+	  bindsym --to-code Mod4+8 workspace number 8
+	  bindsym --to-code Mod4+9 workspace number 9
+	  bindsym --to-code Mod4+0 workspace number 10
+	  bindsym --to-code Mod4+Shift+1 move container to workspace number 1
+	  bindsym --to-code Mod4+Shift+2 move container to workspace number 2
+	  bindsym --to-code Mod4+Shift+3 move container to workspace number 3
+	  bindsym --to-code Mod4+Shift+4 move container to workspace number 4
+	  bindsym --to-code Mod4+Shift+5 move container to workspace number 5
+	  bindsym --to-code Mod4+Shift+6 move container to workspace number 6
+	  bindsym --to-code Mod4+Shift+7 move container to workspace number 7
+	  bindsym --to-code Mod4+Shift+8 move container to workspace number 8
+	  bindsym --to-code Mod4+Shift+9 move container to workspace number 9
+	  bindsym --to-code Mod4+Shift+0 move container to workspace number 10
 	'';
     config = {
       modifier = "Mod4";
