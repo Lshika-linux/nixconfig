@@ -214,7 +214,6 @@
         "${mod}+d" = "exec rofi -show drun";
         #"${mod}+Tab" = "exec python3 ~/.config/i3/scripts/switcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
-        "${mod}+Shift+w" = "exec ~/scripts_sway/pomodoro_toggle.sh";
 		"${mod}+t" = "exec ~/scripts_sway/timer.sh";
 
         # Pohyb a zaměření oken (i3 styl + 'uring')
