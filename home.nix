@@ -301,7 +301,7 @@
         statusCommand = "i3status -c ${config.xdg.configFile."i3status/config".source}";
         position = "bottom";
         extraConfig = ''
-          bindsym button1 exec kitty --class "floating_impala" -e impala
+          bindsym button1 exec kitty --class "FloatingTerminal" -e impala
         '';
         colors = {
           background = "#282a36";
