@@ -97,12 +97,10 @@
      swayidle
      brightnessctl
      firefox
-     flameshot
      lxqt.lxqt-policykit
      impala       # Wi-Fi TUI
      bluetuith    # Bluetooth TUI
      htop
-     steam
   ];
 
   fonts.packages = with pkgs; [

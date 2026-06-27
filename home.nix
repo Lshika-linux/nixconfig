@@ -15,7 +15,6 @@
     swaybg
     termdown
     obsidian
-    wlogout
     fastfetch
     alacritty
     rofi           # rofi-wayland byl sloučen zpět do rofi
