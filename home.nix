@@ -175,9 +175,9 @@
           tap = "enabled";
           natural_scroll = "enabled";
         };
-        "TPPS/2 IBM TrackPoint" = {
-          events = "disabled"; # Úplné hardwarové odstavení zlobivého trackpointu
-        };
+		"2:10:TPPS/2_IBM_TrackPoint" = {
+		  events = "disabled";
+		};
       };
 
       # Autostart tvých skriptů a démonů na pozadí
