@@ -81,6 +81,7 @@
   environment.systemPackages = with pkgs; [
      vim 
      wget
+     wob	# Volume BAR         
      micro
      kitty
      git

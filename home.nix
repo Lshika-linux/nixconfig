@@ -167,6 +167,7 @@
         { command = "gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'"; always = false; }
         { command = "mpv --no-video ~/scripts_sway/meow.mp3"; } # Počáteční mňouknutí
         { command = "~/scripts_sway/chargersound.sh"; }
+		{ command = "rm -f $SWAYSOCK.wob && mkfifo $SWAYSOCK.wob && tail -f $SWAYSOCK.wob | wob"; }
       ];
 
       # Nastavení mezer (gaps) a ohraničení oken
@@ -249,11 +250,9 @@
         # Multimediální klávesy a HW kontrola jasu/zvuku
         "XF86MonBrightnessUp"   = "exec brightnessctl set +10%";
         "XF86MonBrightnessDown" = "exec brightnessctl set 10%-";
-        # Zatím neexistuje
-        "XF86AudioRaiseVolume"  = "exec ~/scripts_sway/scripts/volume_notify.sh +5%";
-        "XF86AudioLowerVolume"  = "exec ~/scripts_sway/scripts/volume_notify.sh -5%";
-        #
-        "XF86AudioMute"         = "exec pactl set-sink-mute @DEFAULT_SINK@ toggle";
+		"XF86AudioRaiseVolume" = "exec pactl set-sink-volume @DEFAULT_SINK@ +5% && pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1 | cat > $SWAYSOCK.wob";
+		"XF86AudioLowerVolume" = "exec pactl set-sink-volume @DEFAULT_SINK@ -5% && pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+(?=%)' | head -1 | cat > $SWAYSOCK.wob";
+		"XF86AudioMute" = "exec pactl set-sink-mute @DEFAULT_SINK@ toggle";
         "XF86AudioMicMute"      = "exec pactl set-source-mute @DEFAULT_SOURCE@ toggle";
 		"Print" = "exec ~/scripts_sway/screenshot.sh";
 		"Shift+Print" = "exec ~/scripts_sway/screenshot.sh delay";
@@ -399,6 +398,23 @@ home.file."scripts_sway/timer.sh" = {
   '';
 };
 
+
+home.file.".config/wob/wob.ini".text = ''
+  timeout = 1000
+  anchor = right center
+  margin = 20
+  width = 30
+  height = 600
+  orientation = vertical
+  border_offset = 0
+  border_size = 2
+  bar_padding = 2
+  
+  [style.default]
+  background_color = 000000AA
+  border_color = FFFFFFFF
+  bar_color = FFFFFFFF
+'';
 
   # Tvoje zachované aliasy
   programs.bash = {
