@@ -186,7 +186,6 @@
         { command = "libinput-gestures-setup start"; always = false; }
         { command = "gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'"; always = false; }
         { command = "mpv --no-video ~/scripts_sway/meow.mp3"; } # Počáteční mňouknutí
-        { command = "~/scripts_sway/chargersound.sh"; }
 		{ command = "rm -f $SWAYSOCK.wob && mkfifo $SWAYSOCK.wob && tail -f $SWAYSOCK.wob | wob"; }
       ];
 
