@@ -196,7 +196,7 @@
         { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
         { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
         { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-		{ command = "floating enable, sticky enable, resize set 100 50, move position 15 45, border pixel 4"; criteria = { app_id = "PomodoroTimer"; }; }
+		{ command = "floating enable, sticky enable, resize set 200 100, move position 1700 25, border pixel 4"; criteria = { app_id = "PomodoroTimer"; }; }
       ];
 
       # Kompletní klávesové zkratky (Včetně tvého směrového 'uring')
@@ -393,7 +393,7 @@ home.file."scripts_sway/timer.sh" = {
   executable = true;
   text = ''
     #!/usr/bin/env bash
-    mins=$(echo "" | rofi -dmenu -p "⏱ Timer" -l 0 -theme-str 'window { location: north; anchor: north; width: 200px; y-offset: 20; border: 2px; border-color: #ffff00; border-radius: 8px; }')
+    mins=$(echo "" | rofi -dmenu -p "⏱ Timer:" -l 0 -theme-str 'window { location: north; anchor: north; width: 200px; y-offset: 20; border: 2px; border-color: #ffffff; border-radius: 8px; }')
     [ -n "$mins" ] && alacritty --class PomodoroTimer -e termdown "$mins"m
   '';
 };
