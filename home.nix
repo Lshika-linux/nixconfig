@@ -124,6 +124,7 @@
   wayland.windowManager.sway = {
     enable = true;
 	extraConfig = ''
+	  workspace number 1
 	  titlebar_border_thickness 0
 	  titlebar_padding 0 0
 	  for_window [all] title_format " "
