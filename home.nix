@@ -416,6 +416,9 @@ home.file.".config/wob/wob.ini".text = ''
   bar_color = FFFFFFFF
 '';
 
+home.file."scripts_sway/meow.mp3".source = ./sounds/meow.mp3;
+home.file."scripts_sway/minecraftcat.mp3".source = ./sounds/minecraftcat.mp3;
+
   # Tvoje zachované aliasy
   programs.bash = {
     enable = true;
