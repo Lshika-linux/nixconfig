@@ -99,9 +99,9 @@
 	    { command = "floating enable, sticky enable, resize set 330 90, move position 1540 50, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
 		{ command = "floating enable, resize set 370 230, move position 1510 200, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
 		{ command = "floating enable, resize set 500 400, move position 0 45, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
+		{ command = "floating enable, resize set 200 160, move position 1680 860, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
 	  ];
 
-      # Kompletní klávesové zkratky (Včetně tvého směrového 'uring')
       keybindings = let 
         mod = "Mod4";
       in pkgs.lib.mkOptionDefault {
@@ -109,17 +109,16 @@
         "${mod}+Shift+q" = "kill";
         "${mod}+Shift+c" = "reload";
         "${mod}+Shift+r" = "restart";
-        "${mod}+Shift+e" = "exec ~/scripts_sway/powermenu.sh";
-#       "${mod}+Shift+e" = "exec wlogout -l ~/.config/wlogout/layout -b 5";
+		"${mod}+Shift+e" = "exec kitty --class PowerMenu -e python3 ~/scripts_sway/powermenu.py";		
         "${mod}+Shift+x" = "exec ~/scripts_sway/lock.sh";
         "${mod}+Shift+S" = "exec alacritty -e ssh ratta@100.97.214.64";
 
         # Skripty a vyhledávací menu
         "${mod}+d" = "exec rofi -show drun";
-        #"${mod}+Tab" = "exec python3 ~/.config/i3/scripts/switcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
 		"${mod}+t" = "exec kitty --class TimerPicker -e python3 ~/scripts_sway/timer.py";
 		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
+
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";
         "${mod}+k" = "focus down";

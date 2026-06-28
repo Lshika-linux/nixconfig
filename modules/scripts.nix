@@ -1,28 +1,8 @@
 { config, pkgs, ... }: {
 
-home.file."scripts_sway/powermenu.sh" = {
+home.file."scripts_sway/powermenu.py" = {
   executable = true;
-  text = ''
-    #!/usr/bin/env bash
-    options="Lock\nShutdown\nReboot\nSleep\nLogout"
-
-    chosen=$(
-      echo -e "$options" | rofi -dmenu \
-        -p "Power" \
-        -no-custom \
-        -lines 5  \
-        -theme-str 'listview { scrollbar: false; } inputbar { enabled: false; } listview { lines: 5; } window { width: 18em; }'
-    )
-
-    case "$chosen" in
-        Lock) bash ~/scripts_sway/lock.sh ;;
-        Shutdown) systemctl poweroff ;;
-        Reboot) systemctl reboot ;;
-        Sleep) systemctl suspend ;;
-        Logout) swaymsg exit ;;
-        *) exit 0 ;;
-    esac
-  '';
+  source = ../modules/powermenu.py;
 };
 
 home.file."scripts_sway/lock.sh" = {
@@ -266,5 +246,6 @@ home.file."scripts_sway/switcher.py" = {
   executable = true;
   source = ../modules/switcher.py;
 };
+
 
 }
