@@ -247,5 +247,9 @@ home.file."scripts_sway/switcher.py" = {
   source = ../modules/switcher.py;
 };
 
+home.file."scripts_sway/launcher.py" = {
+  executable = true;
+  source = ../modules/launcher.py;
+};
 
 }

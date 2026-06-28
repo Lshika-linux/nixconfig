@@ -100,6 +100,7 @@
 		{ command = "floating enable, resize set 370 230, move position 1510 200, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
 		{ command = "floating enable, resize set 500 400, move position 0 45, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
 		{ command = "floating enable, resize set 200 160, move position 1680 860, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
+		{ command = "floating enable, resize set 500 400, move position 0 645, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
 	  ];
 
       keybindings = let 
@@ -114,7 +115,8 @@
         "${mod}+Shift+S" = "exec alacritty -e ssh ratta@100.97.214.64";
 
         # Skripty a vyhledávací menu
-        "${mod}+d" = "exec rofi -show drun";
+#        "${mod}+d" = "exec rofi -show drun";
+		"${mod}+d" = "exec kitty --class AppLauncher -e python3 ~/scripts_sway/launcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
 		"${mod}+t" = "exec kitty --class TimerPicker -e python3 ~/scripts_sway/timer.py";
 		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
