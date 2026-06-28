@@ -240,7 +240,7 @@ home.file."scripts_sway/kb_layout.sh" = {
     #!/usr/bin/env bash
     
     update_layout() {
-      swaymsg -t get_inputs | python3 -c "
+      new=$(swaymsg -t get_inputs | python3 -c "
 import json,sys
 inputs = json.load(sys.stdin)
 for i in inputs:
@@ -248,7 +248,11 @@ for i in inputs:
     if l:
         print(\"CZE\" if \"Czech\" in l else \"ENG\")
         break
-" > /tmp/kb_layout.tmp && mv /tmp/kb_layout.tmp /tmp/kb_layout
+")
+      current=$(cat /tmp/kb_layout 2>/dev/null)
+      if [ "$new" != "$current" ]; then
+        echo "$new" > /tmp/kb_layout.tmp && mv /tmp/kb_layout.tmp /tmp/kb_layout
+      fi
     }
     
     update_layout
