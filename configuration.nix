@@ -81,6 +81,7 @@
 
   # Sys. packages (ideally only basic SW and TUI tools)
   environment.systemPackages = with pkgs; [
+	 python3
      vim 
      wget
      wob	# Volume BAR         

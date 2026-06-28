@@ -31,7 +31,7 @@
 	'';
     config = {
       modifier = "Mod4";
-      terminal = "alacritty"; # Přesně podle tvého i3 nastavení
+      terminal = "kitty"; 
 
       fonts = {
         names = [ "Inter" ];
@@ -90,12 +90,12 @@
 
       # Pravidla chování pro specifická okna a TUI rozhraní
       window.commands = [
-        { command = "border pixel 3"; criteria = { class = "Alacritty"; }; }
+        { command = "border pixel 3"; criteria = { class = "kitty"; }; }
         { command = "floating enable"; criteria = { class = "FloatingTUI"; }; }
         { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
         { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
         { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-		{ command = "floating enable, sticky enable, resize set 200 100, move position 1700 25, border pixel 4"; criteria = { app_id = "PomodoroTimer"; }; }
+		{ command = "floating enable, sticky enable, resize set 400 200, move position 15 45, border pixel 4"; criteria = { app_id = "PomodoroTimer"; }; }
       ];
 
       # Kompletní klávesové zkratky (Včetně tvého směrového 'uring')
@@ -115,8 +115,8 @@
         "${mod}+d" = "exec rofi -show drun";
         #"${mod}+Tab" = "exec python3 ~/.config/i3/scripts/switcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
-		"${mod}+t" = "exec ~/scripts_sway/timer.sh";
-
+		"${mod}+t" = "exec kitty --class TimerPicker -e python3 ~/scripts_sway/timer.py";
+			
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";
         "${mod}+k" = "focus down";

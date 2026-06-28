@@ -71,15 +71,10 @@ home.file."scripts_sway/screenshot.sh" = {
   '';
 };
 
-home.file."scripts_sway/timer.sh" = {
+home.file."scripts_sway/timer.py" = {
   executable = true;
-  text = ''
-    #!/usr/bin/env bash
-    mins=$(echo "" | rofi -dmenu -p "⏱ Timer:" -l 0 -theme-str 'window { location: north; anchor: north; width: 200px; y-offset: 20; border: 2px; border-color: #ffffff; border-radius: 8px; }')
-    [ -n "$mins" ] && alacritty --class PomodoroTimer -e termdown "$mins"m
-  '';
+  source = ../modules/timer.py;
 };
-
 
 home.file.".config/wob/wob.ini".text = ''
   timeout = 1000
