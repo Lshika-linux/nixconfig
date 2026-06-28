@@ -5,6 +5,11 @@
 { config, pkgs, ... }:
 
 {
+  imports = [
+    ./modules/shell.nix
+  ];
+
+
   home.username = "rafi";
   home.homeDirectory = "/home/rafi";
   home.stateVersion = "24.11";
@@ -550,6 +555,7 @@ home.file.".local/share/mc/skins/dracula.ini".text = ''
   button=#1a1e2e;#5b8dd9
   hotkey=#1a1e2e;#c8848b
 
+# i dont want any double lines, poor solution, but if it works im to lazy to care
   [Lines]
   horiz = ─
   vert = │
@@ -562,33 +568,16 @@ home.file.".local/share/mc/skins/dracula.ini".text = ''
   leftmiddle = ├
   rightmiddle = ┤
   cross = ┼
-  dhoriz = ═
-  dvert = ║
-  dlefttop = ╔
-  drighttop = ╗
-  dleftbottom = ╚
-  drightbottom = ╝
+  dhoriz = ─
+  dvert = │
+  dlefttop = ┌
+  drighttop = ┐
+  dleftbottom = └
+  drightbottom = ┘
 '';
 
 home.file.".config/mc/ini".text = ''
   [Midnight-Commander]
   skin=dracula
 '';
-
-  # Tvoje zachované aliasy
-  programs.bash = {
-    enable = true;
-    shellAliases = {
-      nrs = "sudo nixos-rebuild switch --flake .#node1";
-      ll = "ls -alh";
-      hms = "home-manager switch";
-      bt = "bluetuith";
-    };
-  };
-
-  xdg.configFile."fastfetch/config.jsonc".text = ''
-    {
-      "modules": ["os", "host", "kernel", "uptime", "shell", "terminal", "cpu", "memory"]
-    }
-  '';
 }
