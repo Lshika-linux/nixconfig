@@ -262,4 +262,9 @@ for i in inputs:
   '';
 };
 
+home.file."scripts_sway/switcher.py" = {
+  executable = true;
+  source = ../modules/switcher.py;
+};
+
 }

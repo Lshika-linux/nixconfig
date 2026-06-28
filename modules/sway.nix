@@ -98,6 +98,7 @@
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
 	    { command = "floating enable, sticky enable, resize set 330 90, move position 1540 50, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
 		{ command = "floating enable, resize set 370 230, move position 1510 200, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
+		{ command = "floating enable, resize set 500 400, move position 0 45, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
 	  ];
 
       # Kompletní klávesové zkratky (Včetně tvého směrového 'uring')
@@ -118,7 +119,7 @@
         #"${mod}+Tab" = "exec python3 ~/.config/i3/scripts/switcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
 		"${mod}+t" = "exec kitty --class TimerPicker -e python3 ~/scripts_sway/timer.py";
-			
+		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";
         "${mod}+k" = "focus down";
