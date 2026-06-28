@@ -236,6 +236,6 @@ home.file.".local/share/mc/skins/dracula.ini".text = ''
 home.file.".config/mc/ini".text = ''
   [Midnight-Commander]
   skin=dracula
-'';}
-
+'';
 }
+
