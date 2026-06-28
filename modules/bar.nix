@@ -64,8 +64,15 @@
         };
       };
       "tztime local" = {
-        position = 9;
+        position = 10;
         settings = { format = "%d-%m-%y %H:%M:%S"; };
+      };
+      "read_file KB" = {
+        position = 9;
+        settings = {
+          path = "/tmp/kb_layout";
+          format = "KB: %content";
+        };
       };
     };
   };

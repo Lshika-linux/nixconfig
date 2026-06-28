@@ -23,16 +23,17 @@
   home.packages = with pkgs; [
     swaybg
     termdown
+	xkblayout-state
     obsidian
     fastfetch
     alacritty
-    rofi           # rofi-wayland byl sloučen zpět do rofi
+    rofi                # rofi-wayland byl sloučen zpět do rofi
     i3status
-    blanket        # Pro zkratku $mod+B
+    blanket             # Pro zkratku $mod+B
     libinput-gestures
-    inter          # Inter font použitý v sway config (font pango:Inter)
-    ubuntu-classic # Ubuntu font pro bar (dříve ubuntu_font_family)
-    mpv           # Pro meow.mp3 při startu
+    inter               # Inter font použitý v sway config (font pango:Inter)
+    ubuntu-classic      # Ubuntu font pro bar (dříve ubuntu_font_family)
+    mpv                 # Pro meow.mp3 při startu
     gnome-themes-extra  # Pro Adwaita-dark GTK téma
   ];
 

@@ -68,6 +68,7 @@
         { command = "gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'"; always = false; }
         { command = "mpv --no-video ~/scripts_sway/meow.mp3"; } # Počáteční mňouknutí
 		{ command = "rm -f $SWAYSOCK.wob && mkfifo $SWAYSOCK.wob && tail -f $SWAYSOCK.wob | wob"; }
+		{ command = "~/scripts_sway/kb_layout.sh"; always = false; }
       ];
 
       # Nastavení mezer (gaps) a ohraničení oken
@@ -89,14 +90,15 @@
 
 
       # Pravidla chování pro specifická okna a TUI rozhraní
-      window.commands = [
-        { command = "border pixel 3"; criteria = { class = "kitty"; }; }
-        { command = "floating enable"; criteria = { class = "FloatingTUI"; }; }
-        { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
-        { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
-        { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-		{ command = "floating enable, sticky enable, resize set 400 200, move position 15 45, border pixel 4"; criteria = { app_id = "PomodoroTimer"; }; }
-      ];
+	  window.commands = [
+	    { command = "border pixel 3"; criteria = { class = "kitty"; }; }
+	    { command = "floating enable"; criteria = { class = "FloatingTUI"; }; }
+	    { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
+	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
+	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
+	    { command = "floating enable, sticky enable, resize set 330 90, move position 1540 50, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
+		{ command = "floating enable, resize set 370 230, move position 1510 200, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
+	  ];
 
       # Kompletní klávesové zkratky (Včetně tvého směrového 'uring')
       keybindings = let 

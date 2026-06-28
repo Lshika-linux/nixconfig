@@ -155,6 +155,7 @@ home.file.".config/rofi/config.rasi".text = ''
   }
 '';
 
+
 home.file.".local/share/mc/skins/dracula.ini".text = ''
   [skin]
   description = Dracula
@@ -232,5 +233,29 @@ home.file.".config/mc/ini".text = ''
   [Midnight-Commander]
   skin=dracula
 '';
-}
 
+home.file."scripts_sway/kb_layout.sh" = {
+  executable = true;
+  text = ''
+    #!/usr/bin/env bash
+    
+    update_layout() {
+      swaymsg -t get_inputs | python3 -c "
+import json,sys
+inputs = json.load(sys.stdin)
+for i in inputs:
+    l = i.get(\"xkb_active_layout_name\",\"\")
+    if l:
+        print(\"CZE\" if \"Czech\" in l else \"ENG\")
+        break
+" > /tmp/kb_layout.tmp && mv /tmp/kb_layout.tmp /tmp/kb_layout
+    }
+    
+    update_layout
+    swaymsg -t subscribe '["input"]' | while read -r _; do
+      update_layout
+    done
+  '';
+};
+
+}
