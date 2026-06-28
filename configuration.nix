@@ -89,6 +89,7 @@
      git
      curl
      wl-clipboard
+	 mc
      udiskie
      kanshi
      grim

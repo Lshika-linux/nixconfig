@@ -498,6 +498,83 @@ home.file.".config/rofi/config.rasi".text = ''
   }
 '';
 
+home.file.".local/share/mc/skins/dracula.ini".text = ''
+  [skin]
+  description = Dracula
+
+  [core]
+  _default_=white;#1a1e2e
+  selected=white;#313244
+  marked=#f1fa8c;#1a1e2e
+  markselect=#f1fa8c;#313244
+  gauge=#cdd6f4;#1a1e2e
+  input=#cdd6f4;#313244
+  inputmark=#1a1e2e;#cdd6f4
+  inputunchanged=#6272a4;#1a1e2e
+  commandlinemark=#1a1e2e;#cdd6f4
+  reverse=#1a1e2e;#cdd6f4
+  header=#5b8dd9;#1a1e2e
+  disabled=#6272a4;#1a1e2e
+  focus=#1a1e2e;#5b8dd9
+  dfocus=#cdd6f4;#313244
+  shadfocus=#1a1e2e;#5b8dd9
+  border=#5b8dd9;#1a1e2e
+  
+  [dialog]
+  _default_=#cdd6f4;#313244
+  dsel=#1a1e2e;#5b8dd9
+  dfocus=#1a1e2e;#5b8dd9
+  dtitle=#5b8dd9;#313244
+
+  [error]
+  _default_=#cdd6f4;#ff5555
+  errdfocus=#1a1e2e;#ff5555
+  errdtitle=white;#ff5555
+
+  [menu]
+  _default_=#cdd6f4;#313244
+  menusel=#1a1e2e;#5b8dd9
+  menutitle=#5b8dd9;#1a1e2e
+  menuhotkey=#ff5555;#313244
+  menusel=#1a1e2e;#5b8dd9
+
+  [popupmenu]
+  _default_=#cdd6f4;#313244
+  title=#5b8dd9;#313244
+  selected=#1a1e2e;#5b8dd9
+
+  [statusbar]
+  _default_=#cdd6f4;#1a1e2e
+
+  [buttonbar]
+  button=#1a1e2e;#5b8dd9
+  hotkey=#1a1e2e;#c8848b
+
+  [Lines]
+  horiz = ─
+  vert = │
+  lefttop = ┌
+  righttop = ┐
+  leftbottom = └
+  rightbottom = ┘
+  topmiddle = ┬
+  bottommiddle = ┴
+  leftmiddle = ├
+  rightmiddle = ┤
+  cross = ┼
+  dhoriz = ═
+  dvert = ║
+  dlefttop = ╔
+  drighttop = ╗
+  dleftbottom = ╚
+  drightbottom = ╝
+'';
+
+home.file.".config/mc/ini".text = ''
+  [Midnight-Commander]
+  skin=dracula
+'';
+
   # Tvoje zachované aliasy
   programs.bash = {
     enable = true;
