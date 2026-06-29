@@ -99,6 +99,8 @@ def main(stdscr):
             selected = (selected - 1) % len(windows)
         elif key == curses.KEY_DOWN:
             selected = (selected + 1) % len(windows)
+        elif key == ord('\t'):
+            selected = (selected + 1) % len(windows)
         elif key in (10, 13):
             return windows[selected]["id"]
         elif key == 27:
