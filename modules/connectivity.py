@@ -128,7 +128,7 @@ def main(stdscr):
                 pass
 
         # Bottom hints
-        hints = "Tab switch   Enter open   Esc close"
+        hints = "TAB switch   ENTER open   ESC close"
         try:
             stdscr.addstr(h - 1, w//2 - len(hints)//2, hints, curses.color_pair(2))
         except curses.error:
