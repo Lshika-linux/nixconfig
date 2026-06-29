@@ -236,7 +236,7 @@ for i in inputs:
     }
     
     update_layout
-    swaymsg -t subscribe '["input"]' | while read -r _; do
+    swaymsg -t subscribe '["input"]' --monitor | while read -r _; do
       update_layout
     done
   '';
