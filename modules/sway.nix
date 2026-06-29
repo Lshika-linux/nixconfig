@@ -101,6 +101,8 @@
 		{ command = "floating enable, resize set 500 400, move position 0 45, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
 		{ command = "floating enable, resize set 200 160, move position 1680 860, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
 		{ command = "floating enable, resize set 500 400, move position 0 645, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
+		{ command = "floating enable, resize set 900 220, move position 510 45, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
+		{ command = "floating enable, resize set 700 500, move position center, border pixel 2"; criteria = { app_id = "FloatingCenter"; }; }
 	  ];
 
       keybindings = let 
@@ -120,6 +122,7 @@
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
 		"${mod}+t" = "exec kitty --class TimerPicker -e python3 ~/scripts_sway/timer.py";
 		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
+		"${mod}+c" = "exec kitty --class Connectivity -e python3 ~/scripts_sway/connectivity.py";
 
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";

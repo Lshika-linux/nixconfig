@@ -252,4 +252,9 @@ home.file."scripts_sway/launcher.py" = {
   source = ../modules/launcher.py;
 };
 
+home.file."scripts_sway/connectivity.py" = {
+  executable = true;
+  source = ../modules/connectivity.py;
+};
+
 }
