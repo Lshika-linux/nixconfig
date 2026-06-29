@@ -48,13 +48,14 @@
         position = 6;
         settings = { format = "CPU: %usage"; };
       };
-      "cpu_temperature 0" = {
-        position = 7;
-        settings = {
-          format = "CPUTEMP: %degrees °C";
-          max_threshold = 80;
-        };
-      };
+	  "cpu_temperature 0" = {
+	    position = 7;
+	    settings = {
+	      format = "CPUTEMP: %degrees °C";
+	      max_threshold = 80;
+	      path = "/sys/class/hwmon/hwmon7/temp1_input";
+	    };
+	  };
       "memory" = {
         position = 8;
         settings = {

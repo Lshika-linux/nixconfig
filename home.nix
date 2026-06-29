@@ -28,6 +28,7 @@
     fastfetch
     alacritty
     rofi                # rofi-wayland byl sloučen zpět do rofi
+	lm_sensors
     i3status
     blanket             # Pro zkratku $mod+B
     libinput-gestures

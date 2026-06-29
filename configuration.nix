@@ -116,6 +116,8 @@
 
   # Zakázání trackpointu na systémové úrovni (Sway ho navíc pojistí v home.nix)
   hardware.trackpoint.enable = false;
+
+  hardware.sensor.iio.enable = true;
   
   security.polkit.enable = true;
   services.udisks2.enable = true;
