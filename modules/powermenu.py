@@ -68,4 +68,4 @@ def main(stdscr):
 
 result = curses.wrapper(main)
 if result:
-    subprocess.Popen(result)
+    subprocess.run(result)
