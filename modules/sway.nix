@@ -3,6 +3,8 @@
 {
   wayland.windowManager.sway = {
     enable = true;
+	package = pkgs.swayfx;
+	checkConfig = false;
 	extraConfig = ''
 	  workspace number 1
 	  titlebar_border_thickness 0
@@ -28,7 +30,18 @@
 	  bindsym --to-code Mod4+Shift+8 move container to workspace number 8
 	  bindsym --to-code Mod4+Shift+9 move container to workspace number 9
 	  bindsym --to-code Mod4+Shift+0 move container to workspace number 10
+	  # --- swayfx ---
+	  corner_radius 8
+	  blur enable
+	  blur_xray disable
+	  blur_passes 2
+	  blur_radius 5
+	  default_dim_inactive 0.15
+	  shadows enable
+	  shadow_blur_radius 20
+	  shadow_color #00000070
 	'';
+	
     config = {
       modifier = "Mod4";
       terminal = "kitty"; 
@@ -97,21 +110,21 @@
 	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
 	 
-	   # TOP ROW
-	    { command = "floating enable, resize set 557 367, move position 12 21, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
-	    { command = "floating enable, resize set 692 212, move position 618 21, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
-	    { command = "floating enable, resize set 557 367, move position 1337 21, border pixel 2"; criteria = { app_id = "Weather"; }; }
-	 
-	   # RIGHT COLUMN
-	    { command = "floating enable, sticky enable, resize set 326 81, move position 1580 439, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
-	    { command = "floating enable, resize set 292 199, move position 1610 552, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
-	    { command = "floating enable, resize set 287 271, move position 1617 769, border pixel 2"; criteria = { app_id = "Calendar"; }; }
-	 
-	   # LEFT COLUMN
-	    { command = "floating enable, resize set 287 188, move position 18 405, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
-	    { command = "floating enable, resize set 287 394, move position 18 622, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
-	 
-	    { command = "floating enable, resize set 700 500, move position center, border pixel 2"; criteria = { app_id = "FloatingCenter"; }; }
+		# TOP ROW
+			    { command = "floating enable, resize set 557 367, move position 12 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "WindowSwitcher"; }; }
+			    { command = "floating enable, resize set 692 212, move position 618 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "Connectivity"; }; }
+			    { command = "floating enable, resize set 557 367, move position 1337 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "Weather"; }; }
+			 
+			   # RIGHT COLUMN
+			    { command = "floating enable, sticky enable, resize set 326 81, move position 1580 439, border pixel 2, dim_inactive 0"; criteria = { app_id = "StickyTimer"; }; }
+			    { command = "floating enable, resize set 292 199, move position 1610 552, border pixel 2, dim_inactive 0"; criteria = { app_id = "TimerPicker"; }; }
+			    { command = "floating enable, resize set 287 271, move position 1617 769, border pixel 2, dim_inactive 0"; criteria = { app_id = "Calendar"; }; }
+			 
+			   # LEFT COLUMN
+			    { command = "floating enable, resize set 287 188, move position 18 405, border pixel 2, dim_inactive 0"; criteria = { app_id = "PowerMenu"; }; }
+			    { command = "floating enable, resize set 287 394, move position 18 622, border pixel 2, dim_inactive 0"; criteria = { app_id = "AppLauncher"; }; }
+			 
+			    { command = "floating enable, resize set 700 500, move position center, border pixel 2, dim_inactive 0"; criteria = { app_id = "FloatingCenter"; }; }
 	  ];
 
       keybindings = let 

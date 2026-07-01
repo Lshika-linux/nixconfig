@@ -48,6 +48,7 @@
   # Allows the core of Sway on the system level
   programs.sway = {
     enable = true;
+	package = pkgs.swayfx;
     wrapperFeatures.gtk = true; # For the correct implementation of GTK themes (.. Adwaita..)
   };
 
