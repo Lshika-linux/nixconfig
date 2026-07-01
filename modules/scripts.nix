@@ -262,4 +262,9 @@ home.file."scripts_sway/raficalendar.py" = {
   source = ../modules/raficalendar.py;
 };
 
+home.file."scripts_sway/weather.py" = {
+  executable = true;
+  source = ../modules/weather.py;
+};
+
 }

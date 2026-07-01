@@ -96,14 +96,23 @@
 	    { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
 	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-		{ command = "floating enable, sticky enable, resize set 286 85, move position 1600 515, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }	  
-		{ command = "floating enable, resize set 696 216, move position 614 34, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
-		{ command = "floating enable, resize set 291 192, move position 1596 618, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
-		{ command = "floating enable, resize set 291 192, move position 1596 824, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
-		{ command = "floating enable, resize set 291 398, move position 34 618, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
-		{ command = "floating enable, resize set 291 266, move position 34 325, border pixel 2"; criteria = { app_id = "Calendar"; }; }
-		{ command = "floating enable, resize set 556 266, move position 34 38, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
-	    ];
+	 
+	   # TOP ROW
+	    { command = "floating enable, resize set 557 367, move position 12 21, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
+	    { command = "floating enable, resize set 692 212, move position 618 21, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
+	    { command = "floating enable, resize set 557 367, move position 1337 21, border pixel 2"; criteria = { app_id = "Weather"; }; }
+	 
+	   # RIGHT COLUMN
+	    { command = "floating enable, sticky enable, resize set 326 81, move position 1580 439, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
+	    { command = "floating enable, resize set 292 199, move position 1610 552, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
+	    { command = "floating enable, resize set 287 271, move position 1617 769, border pixel 2"; criteria = { app_id = "Calendar"; }; }
+	 
+	   # LEFT COLUMN
+	    { command = "floating enable, resize set 287 188, move position 18 405, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
+	    { command = "floating enable, resize set 287 394, move position 18 622, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
+	 
+	    { command = "floating enable, resize set 700 500, move position center, border pixel 2"; criteria = { app_id = "FloatingCenter"; }; }
+	  ];
 
       keybindings = let 
         mod = "Mod4";
@@ -124,7 +133,8 @@
 		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
 		"${mod}+c" = "exec kitty --class Connectivity -e python3 ~/scripts_sway/connectivity.py";
 		"${mod}+n" = "exec kitty --class Calendar -e python3 ~/scripts_sway/raficalendar.py";
-
+		"${mod}+p" = "exec kitty --class Weather -e python3 ~/scripts_sway/weather.py";
+		
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";
         "${mod}+k" = "focus down";
