@@ -96,8 +96,7 @@
 	    { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
 	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-	    { command = "floating enable, sticky enable, resize set 330 90, move position 1540 50, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
-	  
+		{ command = "floating enable, sticky enable, resize set 286 85, move position 1600 515, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }	  
 		{ command = "floating enable, resize set 696 216, move position 614 34, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
 		{ command = "floating enable, resize set 291 192, move position 1596 618, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
 		{ command = "floating enable, resize set 291 192, move position 1596 824, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
