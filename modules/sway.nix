@@ -134,7 +134,7 @@
 		"${mod}+c" = "exec kitty --class Connectivity -e python3 ~/scripts_sway/connectivity.py";
 		"${mod}+n" = "exec kitty --class Calendar -e python3 ~/scripts_sway/raficalendar.py";
 		"${mod}+p" = "exec kitty --class Weather -e python3 ~/scripts_sway/weather.py";
-		
+
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";
         "${mod}+k" = "focus down";

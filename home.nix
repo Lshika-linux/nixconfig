@@ -26,7 +26,6 @@
 	xkblayout-state
     obsidian
     fastfetch
-    alacritty
     rofi                # rofi-wayland byl sloučen zpět do rofi
 	lm_sensors
     i3status
