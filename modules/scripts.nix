@@ -257,4 +257,9 @@ home.file."scripts_sway/connectivity.py" = {
   source = ../modules/connectivity.py;
 };
 
+home.file."scripts_sway/raficalendar.py" = {
+  executable = true;
+  source = ../modules/raficalendar.py;
+};
+
 }

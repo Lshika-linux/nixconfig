@@ -18,15 +18,11 @@ def main(stdscr):
     def draw():
         stdscr.clear()
         h, w = stdscr.getmaxyx()
-        if h < 10 or w < 35:
-            stdscr.addstr(0, 0, f"Terminal too small! ({w}x{h}) Need 50x12")
-            stdscr.refresh()
-            return
         try:
             title = "SET TIMER"
-            stdscr.addstr(h//2 - 4, w//2 - len(title)//2, title, curses.color_pair(3) | curses.A_BOLD)
+            stdscr.addstr(h//2 - 2, w//2 - len(title)//2, title, curses.color_pair(3) | curses.A_BOLD)
             x_start = w//2 - 10
-            y = h//2 - 1
+            y = h//2
             for i, (val, label) in enumerate(zip(values, labels)):
                 segment = f" {val:02d} "
                 x = x_start + i * 7
@@ -39,12 +35,10 @@ def main(stdscr):
             for i, label in enumerate(labels):
                 x = x_start + i * 7 + 1
                 stdscr.addstr(y + 1, x, label, curses.color_pair(2) if i == selected else curses.color_pair(3))
-            hints = "up/down adjust   left/right switch   Enter start   Esc cancel"
-            stdscr.addstr(h//2 + 3, w//2 - len(hints)//2, hints, curses.color_pair(3))
         except curses.error:
             pass
         stdscr.refresh()
-        
+            
     while True:
         draw()
         key = stdscr.getch()

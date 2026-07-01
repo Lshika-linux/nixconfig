@@ -97,13 +97,14 @@
 	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
 	    { command = "floating enable, sticky enable, resize set 330 90, move position 1540 50, border pixel 2"; criteria = { app_id = "StickyTimer"; }; }
-		{ command = "floating enable, resize set 370 230, move position 1510 200, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
-		{ command = "floating enable, resize set 500 400, move position 0 45, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
-		{ command = "floating enable, resize set 200 160, move position 1680 860, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
-		{ command = "floating enable, resize set 500 400, move position 0 645, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
-		{ command = "floating enable, resize set 900 220, move position 510 45, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
-		{ command = "floating enable, resize set 700 500, move position center, border pixel 2"; criteria = { app_id = "FloatingCenter"; }; }
-	  ];
+	  
+		{ command = "floating enable, resize set 696 216, move position 614 34, border pixel 2"; criteria = { app_id = "Connectivity"; }; }
+		{ command = "floating enable, resize set 291 192, move position 1596 618, border pixel 2"; criteria = { app_id = "TimerPicker"; }; }
+		{ command = "floating enable, resize set 291 192, move position 1596 824, border pixel 2"; criteria = { app_id = "PowerMenu"; }; }
+		{ command = "floating enable, resize set 291 398, move position 34 618, border pixel 2"; criteria = { app_id = "AppLauncher"; }; }
+		{ command = "floating enable, resize set 291 266, move position 34 325, border pixel 2"; criteria = { app_id = "Calendar"; }; }
+		{ command = "floating enable, resize set 556 266, move position 34 38, border pixel 2"; criteria = { app_id = "WindowSwitcher"; }; }
+	    ];
 
       keybindings = let 
         mod = "Mod4";
@@ -120,9 +121,10 @@
 #        "${mod}+d" = "exec rofi -show drun";
 		"${mod}+d" = "exec kitty --class AppLauncher -e python3 ~/scripts_sway/launcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
-		"${mod}+t" = "exec kitty --class TimerPicker -e python3 ~/scripts_sway/timer.py";
+		"${mod}+t" = "exec kitty --class TimerPicker --override font_size=14 -e python3 ~/scripts_sway/timer.py";
 		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
 		"${mod}+c" = "exec kitty --class Connectivity -e python3 ~/scripts_sway/connectivity.py";
+		"${mod}+n" = "exec kitty --class Calendar -e python3 ~/scripts_sway/raficalendar.py";
 
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";

@@ -35,7 +35,7 @@
       "volume master" = {
         position = 4;
         settings = {
-          format = "VOL:    %volume";
+          format = "VOL: %volume";
           format_muted = "VOL:  MUTED";
           device = "default";
         };
