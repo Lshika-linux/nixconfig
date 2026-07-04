@@ -120,11 +120,23 @@ def focus_window(con_id):
 # ---------- calendar (z raficalendar.py) ----------
 
 def load_notes():
+    """Vrátí { 'YYYY-MM-DD': [note1, note2, ...] }. Migruje starý formát
+    (jeden string na den) na seznam, aby se nerozbily existující poznámky."""
     try:
         with open(NOTES_FILE) as f:
-            return json.load(f)
+            raw = json.load(f)
     except Exception:
         return {}
+
+    migrated = {}
+    for k, v in raw.items():
+        if isinstance(v, list):
+            migrated[k] = [s for s in v if s]
+        elif isinstance(v, str) and v:
+            migrated[k] = [v]
+        else:
+            migrated[k] = []
+    return migrated
 
 
 def save_notes(notes):
@@ -230,107 +242,150 @@ def draw_grid(stdscr, windows, selected, y0, x0, width, height):
 
 # ---------- pravý panel: weather ----------
 
-def draw_weather(stdscr, y0, x0, width, height):
+def draw_weather_strip(stdscr, y0, x0, width, height):
+    """Trvalý kompaktní blok počasí - vždy viditelný dole pod hlavním obsahem."""
+    draw_box(stdscr, y0, x0, height, width, False, "Weather")
     data = query_daemon("weather")
     if not data:
         safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - 4, "no data", curses.color_pair(5))
         return
 
-    row = y0
-    safe_addstr(stdscr, row, x0 + width // 2 - len(data["city"]) // 2, data["city"],
-                curses.color_pair(2) | curses.A_BOLD)
-    row += 2
-
     icon = weather_icon(data["desc"])
-    temp_str = f"{icon}  {data['temp']}°C"
-    safe_addstr(stdscr, row, x0 + width // 2 - len(temp_str) // 2, temp_str,
+    line1 = f"{data['city']}   {icon} {data['temp']}°C   {data['desc']}"
+    safe_addstr(stdscr, y0 + 1, x0 + width // 2 - len(line1) // 2, line1,
                 curses.color_pair(3) | curses.A_BOLD)
-    row += 1
 
-    desc_str = data["desc"]
-    feels_str = f"feels {data['feels']}°C   wind {data['wind']} km/h   humidity {data['humidity']}%"
-    safe_addstr(stdscr, row, x0 + width // 2 - len(desc_str) // 2, desc_str, curses.color_pair(1))
-    row += 1
-    safe_addstr(stdscr, row, x0 + width // 2 - len(feels_str) // 2, feels_str, curses.color_pair(6))
-    row += 2
+    line2 = f"feels {data['feels']}°C   wind {data['wind']} km/h   humidity {data['humidity']}%"
+    safe_addstr(stdscr, y0 + 2, x0 + width // 2 - len(line2) // 2, line2, curses.color_pair(6))
 
-    if data.get("forecast"):
-        col_w = width // 3
-        for i, day in enumerate(data["forecast"]):
-            x = x0 + i * col_w
-            icon_f = weather_icon(day["desc"])
+    if data.get("forecast") and height >= 5:
+        parts = []
+        for day in data["forecast"]:
             date_parts = day["date"].split("-")
             date_short = f"{date_parts[2]}.{date_parts[1]}"
-            temp_range = f"{day['min']}-{day['max']}°C"
-            safe_addstr(stdscr, row, x, date_short.center(col_w - 1), curses.color_pair(2))
-            safe_addstr(stdscr, row + 1, x, (icon_f + " " + day["desc"][:col_w - 4]).center(col_w - 1),
-                        curses.color_pair(1))
-            safe_addstr(stdscr, row + 2, x, temp_range.center(col_w - 1), curses.color_pair(3))
+            parts.append(f"{date_short} {weather_icon(day['desc'])} {day['min']}-{day['max']}°C")
+        line3 = "   ".join(parts)
+        safe_addstr(stdscr, y0 + 3, x0 + width // 2 - len(line3) // 2, line3, curses.color_pair(1))
 
 
-# ---------- pravý panel: kalendář (interaktivní, vlastní smyčka) ----------
+# ---------- pravý panel: kalendář (render + interaktivní smyčka) ----------
+
+WEEKDAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+NOTES_PANEL_H = 9  # kolik řádků dole je vyhrazeno na seznam poznámek
+
+
+def render_calendar(stdscr, year, month, day, notes, y0, x0, width, height,
+                     interactive=True, panel_mode=False, notes_sel=0):
+    """Čistě vykreslení - používá se pro preview (na hover) i uvnitř run_calendar.
+    panel_mode=True znamená, že fokus je v seznamu poznámek (ne na gridu dní)."""
+    today = datetime.date.today()
+    for i in range(height):
+        safe_addstr(stdscr, y0 + i, x0, " " * width)
+
+    cal = calendar.monthcalendar(year, month)
+    month_name = datetime.date(year, month, 1).strftime("%B %Y")
+    safe_addstr(stdscr, y0, x0 + width // 2 - len(month_name) // 2, month_name,
+                curses.color_pair(2) | curses.A_BOLD)
+
+    col_w = width // 7
+    header_y = y0 + 2
+    for i, wd in enumerate(WEEKDAY_NAMES):
+        x = x0 + i * col_w
+        safe_addstr(stdscr, header_y, x + col_w // 2 - 1, wd, curses.color_pair(4) | curses.A_BOLD)
+
+    grid_top = header_y + 1
+    grid_bottom = y0 + height - NOTES_PANEL_H - 2
+    n_weeks = len(cal)
+    row_h = max((grid_bottom - grid_top) // n_weeks, 3)
+
+    for week_i, week in enumerate(cal):
+        for day_i, d in enumerate(week):
+            if d == 0:
+                continue
+            cx = x0 + day_i * col_w
+            cy = grid_top + week_i * row_h
+            key = note_key(year, month, d)
+            day_notes_cell = notes.get(key, [])
+            n_notes = len(day_notes_cell)
+            is_today = (d == today.day and month == today.month and year == today.year)
+            is_selected = (d == day)
+
+            draw_box(stdscr, cy, cx, row_h, col_w, is_selected and not panel_mode)
+
+            num_color = curses.color_pair(7) | curses.A_BOLD if is_selected \
+                else curses.color_pair(8) | curses.A_BOLD if is_today \
+                else curses.color_pair(1)
+            safe_addstr(stdscr, cy + 1, cx + 2, f"{d:2d}", num_color)
+
+            if n_notes and row_h > 2:
+                dots = "•" * min(n_notes, 3) + (f" +{n_notes - 3}" if n_notes > 3 else "")
+                safe_addstr(stdscr, cy + row_h - 2, cx + 2, dots[:col_w - 3], curses.color_pair(4))
+
+    panel_y = grid_top + n_weeks * row_h + 1
+    selected_key = note_key(year, month, day)
+    day_notes = notes.get(selected_key, [])
+    date_str = datetime.date(year, month, day).strftime("%d. %m. %Y")
+    count_str = f"({len(day_notes)} notes)" if day_notes else "(no notes)"
+    panel_title_color = curses.color_pair(3) | curses.A_BOLD if panel_mode else curses.color_pair(2) | curses.A_BOLD
+    safe_addstr(stdscr, panel_y, x0, f"{date_str}  {count_str}", panel_title_color)
+
+    max_visible = NOTES_PANEL_H - 3
+    all_lines = day_notes + ["+ new note"]
+    shown = all_lines[:max_visible]
+    for i, note_text in enumerate(shown):
+        is_new_line = (i == len(day_notes))
+        is_sel = panel_mode and i == notes_sel
+        if is_new_line:
+            prefix = "> " if is_sel else "+ "
+            color = curses.color_pair(3) | curses.A_BOLD if is_sel else curses.color_pair(6)
+            text = "new note"
+        else:
+            prefix = "> " if is_sel else "- "
+            color = curses.color_pair(7) | curses.A_BOLD if is_sel else curses.color_pair(1)
+            text = note_text
+        safe_addstr(stdscr, panel_y + 1 + i, x0 + 2, (prefix + text)[:width - 4], color)
+    if len(all_lines) > max_visible:
+        safe_addstr(stdscr, panel_y + 1 + max_visible, x0 + 2,
+                    f"... +{len(all_lines) - max_visible} more", curses.color_pair(6))
+
+    if not interactive:
+        hints = "Enter to edit"
+    elif panel_mode:
+        hints = "up/down: pick note   Enter: edit/add   d: delete   Esc: back to calendar"
+    else:
+        hints = "arrows: day   Tab+arrows: month   Enter: notes   Esc: back"
+    safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
+    return panel_y
+
 
 def run_calendar(stdscr, y0, x0, width, height):
     today = datetime.date.today()
     year, month, day = today.year, today.month, today.day
     tab_held = False
     notes = load_notes()
+    panel_mode = False
+    notes_sel = 0
 
     while True:
-        h, w = height, width
-        cal = calendar.monthcalendar(year, month)
-        month_name = datetime.date(year, month, 1).strftime("%B %Y")
-
-        for i in range(h):
-            safe_addstr(stdscr, y0 + i, x0, " " * w)
-
-        safe_addstr(stdscr, y0, x0 + w // 2 - len(month_name) // 2, month_name,
-                    curses.color_pair(2) | curses.A_BOLD)
-
-        days_header = " Mo   Tu   We   Th   Fr   Sa   Su"
-        x_start = x0 + w // 2 - len(days_header) // 2
-        safe_addstr(stdscr, y0 + 1, x_start, days_header, curses.color_pair(4))
-
-        for week_i, week in enumerate(cal):
-            for day_i, d in enumerate(week):
-                if d == 0:
-                    continue
-                x = x_start + day_i * 5
-                y = y0 + week_i + 2
-                key = note_key(year, month, d)
-                has_note = key in notes and notes[key]
-                dot = "•" if has_note else " "
-                is_today = (d == today.day and month == today.month and year == today.year)
-                is_selected = (d == day)
-                label = f"{d:2d}{dot} "
-                if is_selected:
-                    safe_addstr(stdscr, y, x, label, curses.color_pair(7) | curses.A_BOLD)
-                elif is_today:
-                    safe_addstr(stdscr, y, x, label, curses.color_pair(8) | curses.A_BOLD)
-                elif has_note:
-                    safe_addstr(stdscr, y, x, label, curses.color_pair(4))
-                else:
-                    safe_addstr(stdscr, y, x, label, curses.color_pair(1))
-
-        note_y = y0 + len(cal) + 3
+        w = width
         selected_key = note_key(year, month, day)
-        note_text = notes.get(selected_key, "")
-        date_str = datetime.date(year, month, day).strftime("%d. %m. %Y")
-        safe_addstr(stdscr, note_y, x0, date_str, curses.color_pair(2))
-        safe_addstr(stdscr, note_y + 1, x0, (note_text if note_text else "no note")[:w],
-                    curses.color_pair(1) if note_text else curses.color_pair(6))
+        day_notes = notes.get(selected_key, [])
 
-        hints = "arrows: day   Tab+arrows: month   Enter: note   Esc: back"
-        safe_addstr(stdscr, y0 + h - 1, x0 + w // 2 - len(hints) // 2, hints, curses.color_pair(2))
-
+        render_calendar(stdscr, year, month, day, notes, y0, x0, width, height,
+                         panel_mode=panel_mode, notes_sel=notes_sel)
         stdscr.refresh()
         key = stdscr.getch()
 
         if key == 27:
-            return
-        elif key == ord('\t'):
+            if panel_mode:
+                panel_mode = False
+            else:
+                return
+
+        elif not panel_mode and key == ord('\t'):
             tab_held = True
-        elif key == curses.KEY_LEFT:
+
+        elif not panel_mode and key == curses.KEY_LEFT:
             if tab_held:
                 month -= 1
                 if month < 1:
@@ -346,7 +401,8 @@ def run_calendar(stdscr, y0, x0, width, height):
                     day = calendar.monthrange(year, month)[1]
                 else:
                     day = new_day
-        elif key == curses.KEY_RIGHT:
+
+        elif not panel_mode and key == curses.KEY_RIGHT:
             if tab_held:
                 month += 1
                 if month > 12:
@@ -363,7 +419,8 @@ def run_calendar(stdscr, y0, x0, width, height):
                     day = 1
                 else:
                     day = new_day
-        elif key == curses.KEY_UP:
+
+        elif not panel_mode and key == curses.KEY_UP:
             tab_held = False
             new_day = day - 7
             if new_day < 1:
@@ -373,7 +430,8 @@ def run_calendar(stdscr, y0, x0, width, height):
                 day = calendar.monthrange(year, month)[1] + new_day
             else:
                 day = new_day
-        elif key == curses.KEY_DOWN:
+
+        elif not panel_mode and key == curses.KEY_DOWN:
             tab_held = False
             max_day = calendar.monthrange(year, month)[1]
             new_day = day + 7
@@ -384,12 +442,33 @@ def run_calendar(stdscr, y0, x0, width, height):
                 day = new_day - max_day
             else:
                 day = new_day
-        elif key in (10, 13):
+
+        elif not panel_mode and key in (10, 13):
+            # vstup do navigace mezi poznámkami daného dne
             tab_held = False
+            panel_mode = True
+            notes_sel = 0
+
+        elif panel_mode and key == curses.KEY_UP:
+            notes_sel = max(0, notes_sel - 1)
+
+        elif panel_mode and key == curses.KEY_DOWN:
+            notes_sel = min(len(day_notes), notes_sel + 1)  # poslední index = "+ new note"
+
+        elif panel_mode and key in (ord('d'), ord('D')):
+            if day_notes and notes_sel < len(day_notes):
+                day_notes.pop(notes_sel)
+                notes[selected_key] = day_notes
+                save_notes(notes)
+                notes_sel = max(0, min(notes_sel, len(day_notes)))
+
+        elif panel_mode and key in (10, 13):
+            is_new = (notes_sel == len(day_notes))
+            existing = "" if is_new else day_notes[notes_sel]
+            prompt = "new note> " if is_new else "edit note> "
+
             curses.curs_set(1)
-            existing = notes.get(selected_key, "")
-            prompt = "> "
-            input_y = note_y + 1
+            input_y = y0 + height - 2
             safe_addstr(stdscr, input_y, x0, " " * w)
             safe_addstr(stdscr, input_y, x0, prompt + existing)
             stdscr.refresh()
@@ -410,62 +489,78 @@ def run_calendar(stdscr, y0, x0, width, height):
                 safe_addstr(stdscr, input_y, x0, prompt + "".join(text))
                 stdscr.refresh()
             curses.curs_set(0)
+
             result = "".join(text).strip()
-            if result:
-                notes[selected_key] = result
-            elif selected_key in notes:
-                del notes[selected_key]
+            if is_new:
+                if result:
+                    day_notes.append(result)
+            else:
+                if result:
+                    day_notes[notes_sel] = result
+                else:
+                    day_notes.pop(notes_sel)
+                    notes_sel = max(0, notes_sel - 1)
+            notes[selected_key] = day_notes
             save_notes(notes)
+
         else:
             tab_held = False
 
 
-# ---------- pravý panel: timer (interaktivní, vlastní smyčka) ----------
+# ---------- pravý panel: timer (render + interaktivní smyčka) ----------
+
+QUICK_MINUTES = [5, 10, 20]
+TIMER_LABELS = ["HH", "MM", "SS"]
+
+
+def render_timer(stdscr, values, selected, y0, x0, width, height, interactive=True):
+    for i in range(height):
+        safe_addstr(stdscr, y0 + i, x0, " " * width)
+
+    title = "SET TIMER"
+    cy = y0 + height // 2 - 3
+    safe_addstr(stdscr, cy, x0 + width // 2 - len(title) // 2, title, curses.color_pair(2) | curses.A_BOLD)
+
+    x_start = x0 + width // 2 - 10
+    ty = cy + 2
+    for i, (val, label) in enumerate(zip(values, TIMER_LABELS)):
+        segment = f" {val:02d} "
+        x = x_start + i * 7
+        style = curses.color_pair(3) | curses.A_BOLD | curses.A_REVERSE if (interactive and i == selected) \
+            else curses.color_pair(1) | curses.A_BOLD
+        safe_addstr(stdscr, ty, x, segment, style)
+        if i < 2:
+            safe_addstr(stdscr, ty, x + 4, " : ", curses.color_pair(1))
+    for i, label in enumerate(TIMER_LABELS):
+        x = x_start + i * 7 + 1
+        safe_addstr(stdscr, ty + 1, x, label,
+                    curses.color_pair(2) if (interactive and i == selected) else curses.color_pair(3))
+
+    qy = ty + 3
+    qx_start = x0 + width // 2 - 12
+    for i, mins in enumerate(QUICK_MINUTES):
+        idx = 3 + i
+        label = f" +{mins}m "
+        x = qx_start + i * 9
+        style = curses.color_pair(3) | curses.A_BOLD | curses.A_REVERSE if (interactive and idx == selected) \
+            else curses.color_pair(6)
+        safe_addstr(stdscr, qy, x, label, style)
+
+    hints = "left/right: pick   up/down: adjust   Enter: add/start   Esc: cancel" if interactive \
+        else "Enter to set timer"
+    safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
+
 
 def run_timer(stdscr, y0, x0, width, height):
     """6 prvků: 0-2 = HH/MM/SS, 3-5 = +5/+10/+20 quick-add.
     Enter na 0-2 potvrdí a spustí StickyTimer. Enter na 3-5 přičte minuty."""
     values = [0, 0, 0]
-    labels = ["HH", "MM", "SS"]
     limits = [99, 59, 59]
-    quick = [5, 10, 20]
+    quick = QUICK_MINUTES
     selected = 0
 
     while True:
-        for i in range(height):
-            safe_addstr(stdscr, y0 + i, x0, " " * width)
-
-        title = "SET TIMER"
-        cy = y0 + height // 2 - 3
-        safe_addstr(stdscr, cy, x0 + width // 2 - len(title) // 2, title, curses.color_pair(2) | curses.A_BOLD)
-
-        x_start = x0 + width // 2 - 10
-        ty = cy + 2
-        for i, (val, label) in enumerate(zip(values, labels)):
-            segment = f" {val:02d} "
-            x = x_start + i * 7
-            style = curses.color_pair(3) | curses.A_BOLD | curses.A_REVERSE if i == selected \
-                else curses.color_pair(1) | curses.A_BOLD
-            safe_addstr(stdscr, ty, x, segment, style)
-            if i < 2:
-                safe_addstr(stdscr, ty, x + 4, " : ", curses.color_pair(1))
-        for i, label in enumerate(labels):
-            x = x_start + i * 7 + 1
-            safe_addstr(stdscr, ty + 1, x, label, curses.color_pair(2) if i == selected else curses.color_pair(3))
-
-        qy = ty + 3
-        qx_start = x0 + width // 2 - 12
-        for i, mins in enumerate(quick):
-            idx = 3 + i
-            label = f" +{mins}m "
-            x = qx_start + i * 9
-            style = curses.color_pair(3) | curses.A_BOLD | curses.A_REVERSE if idx == selected \
-                else curses.color_pair(6)
-            safe_addstr(stdscr, qy, x, label, style)
-
-        hints = "left/right: pick   up/down: adjust   Enter: add/start   Esc: cancel"
-        safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
-
+        render_timer(stdscr, values, selected, y0, x0, width, height)
         stdscr.refresh()
         key = stdscr.getch()
 
@@ -495,7 +590,7 @@ def run_timer(stdscr, y0, x0, width, height):
             return None
 
 
-# ---------- pravý panel: connectivity chooser ----------
+# ---------- connectivity: pinnuté WiFi/BT boxíky nad power menu ----------
 
 def get_wifi_info():
     return query_daemon("wifi")
@@ -503,6 +598,15 @@ def get_wifi_info():
 
 def get_bt_info():
     return query_daemon("bt")
+
+
+def wifi_dbm_to_percent(dbm):
+    """Standardní odhad kvality signálu z dBm (stejná formule jako NetworkManager)."""
+    try:
+        pct = 2 * (int(dbm) + 100)
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, pct))
 
 
 def launch_kitty_pane(command_list):
@@ -514,55 +618,24 @@ def launch_kitty_pane(command_list):
     )
 
 
-def run_connectivity(stdscr, y0, x0, width, height):
-    selected = 0
-    while True:
-        for i in range(height):
-            safe_addstr(stdscr, y0 + i, x0, " " * width)
+# ---------- pravý panel: app launcher (render + vlastní smyčka) ----------
 
-        half = width // 2
-        draw_box(stdscr, y0, x0, height - 1, half, selected == 0, "WiFi")
-        draw_box(stdscr, y0, x0 + half, height - 1, width - half, selected == 1, "Bluetooth")
+def render_launcher(stdscr, query, filtered, sel, y0, x0, width, height, interactive=True):
+    for i in range(height):
+        safe_addstr(stdscr, y0 + i, x0, " " * width)
 
-        mid = y0 + (height - 1) // 2
+    prompt = f"> {query}"
+    safe_addstr(stdscr, y0, x0, prompt, curses.color_pair(3) | curses.A_BOLD)
 
-        wifi = get_wifi_info()
-        if wifi:
-            safe_addstr(stdscr, mid, x0 + half // 2 - len(wifi["ssid"]) // 2, wifi["ssid"],
-                        curses.color_pair(4) | curses.A_BOLD)
-            rssi = f"{wifi['rssi']} dBm"
-            safe_addstr(stdscr, mid + 1, x0 + half // 2 - len(rssi) // 2, rssi, curses.color_pair(1))
-        else:
-            safe_addstr(stdscr, mid, x0 + half // 2 - 6, "disconnected", curses.color_pair(5))
+    list_y = y0 + 2
+    for i, (name, _cmd) in enumerate(filtered[:height - 3]):
+        style = curses.color_pair(3) | curses.A_REVERSE if (interactive and i == sel) else curses.color_pair(1)
+        safe_addstr(stdscr, list_y + i, x0 + 2, name[:width - 4], style)
 
-        bt = get_bt_info()
-        bx = x0 + half
-        if bt:
-            safe_addstr(stdscr, mid, bx + half // 2 - len(bt["name"]) // 2, bt["name"],
-                        curses.color_pair(4) | curses.A_BOLD)
-            bat = f"bat: {bt['battery']}" if bt.get("battery") else "connected"
-            safe_addstr(stdscr, mid + 1, bx + half // 2 - len(bat) // 2, bat, curses.color_pair(1))
-        else:
-            safe_addstr(stdscr, mid, bx + half // 2 - 6, "disconnected", curses.color_pair(5))
+    hints = "type to search   up/down: pick   Enter: launch   Esc: back" if interactive \
+        else "Enter to search"
+    safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
 
-        hints = "left/right: pick   Enter: open (real kitty panel)   Esc: back"
-        safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
-        stdscr.refresh()
-
-        key = stdscr.getch()
-        if key == 27:
-            return
-        elif key in (curses.KEY_LEFT, curses.KEY_RIGHT, ord('\t')):
-            selected = 1 - selected
-        elif key in (10, 13):
-            if selected == 0:
-                launch_kitty_pane(["impala"])
-            else:
-                launch_kitty_pane(["bluetuith"])
-            return
-
-
-# ---------- pravý panel: app launcher (vlastní smyčka) ----------
 
 def run_launcher(stdscr, y0, x0, width, height):
     apps = scan_desktop_apps()
@@ -572,19 +645,7 @@ def run_launcher(stdscr, y0, x0, width, height):
     curses.curs_set(1)
 
     while True:
-        for i in range(height):
-            safe_addstr(stdscr, y0 + i, x0, " " * width)
-
-        prompt = f"> {query}"
-        safe_addstr(stdscr, y0, x0, prompt, curses.color_pair(3) | curses.A_BOLD)
-
-        list_y = y0 + 2
-        for i, (name, _cmd) in enumerate(filtered[:height - 3]):
-            style = curses.color_pair(3) | curses.A_REVERSE if i == sel else curses.color_pair(1)
-            safe_addstr(stdscr, list_y + i, x0 + 2, name[:width - 4], style)
-
-        hints = "type to search   up/down: pick   Enter: launch   Esc: back"
-        safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
+        render_launcher(stdscr, query, filtered, sel, y0, x0, width, height)
         stdscr.refresh()
 
         key = stdscr.getch()
@@ -614,17 +675,78 @@ def run_launcher(stdscr, y0, x0, width, height):
 
 # ---------- sidebar ----------
 
-def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start):
-    draw_box(stdscr, y0, x0, height, width, False)
-    row = y0 + 1
-    for i in range(power_start):
-        name, kind, extra = items[i]
+def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
+                  desktop_apps_preview, focused=True):
+    draw_box(stdscr, y0, x0, height, width, focused)
+
+    power_block_h = len(POWER_OPTIONS) + 2
+    conn_block_h = 7  # 2x box (výška 3) + 1 řádek odděleného odstupu
+    content_h = height - 2 - power_block_h - conn_block_h
+    band_h = max(content_h // 3, 5)
+
+    band1_y = y0 + 1
+    band2_y = band1_y + band_h
+    band3_y = band2_y + band_h
+
+    app_items = [(i, it) for i, it in enumerate(items) if it[1] == "app"]
+    func_items = [(i, it) for i, it in enumerate(items) if it[1] in ("calendar", "timer")]
+
+    # --- horní třetina: App Launcher - vždy vidět, search pole + náhled seznamu ---
+    safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
+    launcher_focused = (selected == 0)
+    prompt_style = curses.color_pair(3) | curses.A_REVERSE if launcher_focused else curses.color_pair(1)
+    safe_addstr(stdscr, band1_y + 1, x0 + 2, "> search apps"[:width - 4].ljust(width - 4), prompt_style)
+    for i, (name, _cmd) in enumerate(desktop_apps_preview[:band_h - 3]):
+        safe_addstr(stdscr, band1_y + 2 + i, x0 + 2, name[:width - 4], curses.color_pair(6))
+
+    # --- prostřední třetina: Window Switcher - vždy vidět, scroll podle výběru ---
+    safe_addstr(stdscr, band2_y, x0 + 2, "── Windows ──"[:width - 4], curses.color_pair(6))
+    visible_apps = band_h - 1
+    sel_local = next((n for n, (i, _it) in enumerate(app_items) if i == selected), None)
+    offset = 0
+    if sel_local is not None and len(app_items) > visible_apps:
+        offset = max(0, min(sel_local - visible_apps // 2, len(app_items) - visible_apps))
+    for n, (i, (name, _kind, extra)) in enumerate(app_items[offset:offset + visible_apps]):
+        row = band2_y + 1 + n
         label = f"{name}{extra}"
         style = curses.color_pair(3) | curses.A_REVERSE if i == selected else curses.color_pair(1)
         safe_addstr(stdscr, row, x0 + 2, label[:width - 4].ljust(width - 4), style)
-        row += 1
+    if not app_items:
+        safe_addstr(stdscr, band2_y + 1, x0 + 2, "(no windows)", curses.color_pair(6))
 
+    # --- dolní třetina: zbytek funkcionalit ---
+    safe_addstr(stdscr, band3_y, x0 + 2, "── More ──"[:width - 4], curses.color_pair(6))
+    for n, (i, (name, _kind, extra)) in enumerate(func_items):
+        row = band3_y + 1 + n
+        style = curses.color_pair(3) | curses.A_REVERSE if i == selected else curses.color_pair(1)
+        safe_addstr(stdscr, row, x0 + 2, f"{name}{extra}"[:width - 4].ljust(width - 4), style)
+
+    # --- pinnuté WiFi/BT boxíky, hned nad PowerMenu ---
     power_y = y0 + height - 1 - len(POWER_OPTIONS)
+    wifi_idx = next((i for i, it in enumerate(items) if it[1] == "wifi"), None)
+    bt_idx = next((i for i, it in enumerate(items) if it[1] == "bt"), None)
+
+    bt_box_y = power_y - 1 - 3
+    wifi_box_y = bt_box_y - 3
+
+    wifi_data = get_wifi_info()
+    draw_box(stdscr, wifi_box_y, x0, 3, width, selected == wifi_idx, "WiFi")
+    if wifi_data:
+        pct = wifi_dbm_to_percent(wifi_data.get("rssi"))
+        pct_str = f"{pct}%" if pct is not None else "?"
+        safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, f"● {pct_str}", curses.color_pair(4) | curses.A_BOLD)
+    else:
+        safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, "○ --", curses.color_pair(5))
+
+    bt_data = get_bt_info()
+    draw_box(stdscr, bt_box_y, x0, 3, width, selected == bt_idx, "Bluetooth")
+    if bt_data:
+        bat_str = bt_data.get("battery") or "--"
+        safe_addstr(stdscr, bt_box_y + 1, x0 + 2, f"● {bat_str}", curses.color_pair(4) | curses.A_BOLD)
+    else:
+        safe_addstr(stdscr, bt_box_y + 1, x0 + 2, "○ --", curses.color_pair(5))
+
+    # --- pinnuté PowerMenu, beze změny ---
     safe_addstr(stdscr, power_y - 1, x0 + 2, "─" * (width - 4), curses.color_pair(6))
     for j, (key, name, _cmd) in enumerate(POWER_OPTIONS):
         idx = power_start + j
@@ -650,18 +772,14 @@ def main(stdscr):
     stdscr.keypad(True)
 
     apps = get_running_apps()
-    weather_cache = query_daemon("weather")
-    weather_extra = ""
-    if weather_cache:
-        weather_extra = f" [{weather_cache['temp']}°C {weather_icon(weather_cache['desc'])}]"
 
     sidebar_items = [("App Launcher", "launcher", "")]
     sidebar_items += [(name, "app", f" ({len(wins)})") for name, wins in sorted(apps.items())]
     sidebar_items += [
-        ("Weather", "weather", weather_extra),
         ("Calendar", "calendar", ""),
         ("Timer", "timer", ""),
-        ("Connectivity", "connectivity", ""),
+        ("WiFi", "wifi", ""),
+        ("Bluetooth", "bt", ""),
     ]
     power_start = len(sidebar_items)
     for key, name, _cmd in POWER_OPTIONS:
@@ -671,33 +789,41 @@ def main(stdscr):
     grid_sel = 0
     power_keys = {k: cmd for k, _n, cmd in POWER_OPTIONS}
 
+    desktop_apps_cache = scan_desktop_apps()
+    default_timer_values = [0, 0, 0]
+    WEATHER_STRIP_H = 6
+
     while True:
         stdscr.clear()
         h, w = stdscr.getmaxyx()
         side_w = max(w // 5, 20)
+        cx0, cy0 = side_w + 1, 1
+        cwidth = (w - side_w) - 2
+        cheight = (h - 3) - WEATHER_STRIP_H
+        weather_y = cy0 + cheight
 
-        draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start)
+        draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
+                     desktop_apps_cache, focused=True)
+        draw_box(stdscr, 0, side_w, h - 1, w - side_w, False)
+        draw_weather_strip(stdscr, weather_y, cx0, cwidth, WEATHER_STRIP_H)
 
         name, kind, _extra = sidebar_items[sel_side]
         if kind == "app":
             windows = apps.get(name, [])
-            draw_grid(stdscr, windows, grid_sel, 0, side_w, w - side_w, h - 1)
-        elif kind == "weather":
-            draw_weather(stdscr, 1, side_w, w - side_w, h - 2)
+            draw_grid(stdscr, windows, grid_sel, cy0, cx0, cwidth, cheight)
         elif kind == "launcher":
-            safe_addstr(stdscr, h // 2, side_w + (w - side_w) // 2 - 12,
-                        "Enter to search & launch apps", curses.color_pair(2))
+            render_launcher(stdscr, "", desktop_apps_cache, -1, cy0, cx0, cwidth, cheight, interactive=False)
         elif kind == "calendar":
-            safe_addstr(stdscr, h // 2, side_w + (w - side_w) // 2 - 8,
-                        "Enter to open calendar", curses.color_pair(2))
+            today = datetime.date.today()
+            render_calendar(stdscr, today.year, today.month, today.day, load_notes(),
+                             cy0, cx0, cwidth, cheight, interactive=False)
         elif kind == "timer":
-            safe_addstr(stdscr, h // 2, side_w + (w - side_w) // 2 - 6,
-                        "Enter to set timer", curses.color_pair(2))
-        elif kind == "connectivity":
-            safe_addstr(stdscr, h // 2, side_w + (w - side_w) // 2 - 9,
-                        "Enter to open WiFi/BT", curses.color_pair(2))
+            render_timer(stdscr, default_timer_values, -1, cy0, cx0, cwidth, cheight, interactive=False)
+        elif kind in ("wifi", "bt"):
+            safe_addstr(stdscr, h // 2, cx0 + cwidth // 2 - 10,
+                        "Enter to open a real terminal panel", curses.color_pair(2))
         elif kind == "power":
-            safe_addstr(stdscr, h // 2, side_w + (w - side_w) // 2 - 8,
+            safe_addstr(stdscr, h // 2, cx0 + cwidth // 2 - 12,
                         "Enter or shortcut to confirm", curses.color_pair(5))
 
         hints = "TAB navigate   ENTER select   ESC close   l/s/o/r/p power"
@@ -725,22 +851,33 @@ def main(stdscr):
             name, kind, _extra = sidebar_items[sel_side]
             h, w = stdscr.getmaxyx()
             side_w = max(w // 5, 20)
+            cx0, cy0 = side_w + 1, 1
+            cwidth, cheight = (w - side_w) - 2, (h - 3) - WEATHER_STRIP_H
 
             if kind == "app":
                 windows = apps.get(name, [])
                 if windows and 0 <= grid_sel < len(windows):
                     focus_window(windows[grid_sel]["con_id"])
                     return
-            elif kind == "launcher":
-                run_launcher(stdscr, 1, side_w, w - side_w, h - 2)
-            elif kind == "calendar":
-                run_calendar(stdscr, 1, side_w, w - side_w, h - 2)
-            elif kind == "timer":
-                result = run_timer(stdscr, 1, side_w, w - side_w, h - 2)
-                if result == "started":
-                    return
-            elif kind == "connectivity":
-                run_connectivity(stdscr, 1, side_w, w - side_w, h - 2)
+            elif kind in ("launcher", "calendar", "timer"):
+                # fokus se přesouvá do obsahu - sidebar zešedne, obsah dostane zvýrazněný rámeček
+                draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
+                             desktop_apps_cache, focused=False)
+                draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
+                stdscr.refresh()
+
+                if kind == "launcher":
+                    run_launcher(stdscr, cy0, cx0, cwidth, cheight)
+                elif kind == "calendar":
+                    run_calendar(stdscr, cy0, cx0, cwidth, cheight)
+                elif kind == "timer":
+                    result = run_timer(stdscr, cy0, cx0, cwidth, cheight)
+                    if result == "started":
+                        return
+            elif kind == "wifi":
+                launch_kitty_pane(["impala"])
+            elif kind == "bt":
+                launch_kitty_pane(["bluetuith"])
             elif kind == "power":
                 for _k, name_, cmd_ in POWER_OPTIONS:
                     if name_ == name:
