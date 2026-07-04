@@ -83,7 +83,8 @@
   # Sys. packages (ideally only basic SW and TUI tools)
   environment.systemPackages = with pkgs; [
 	 (python3.withPackages (ps: with ps; [ i3ipc ]))
-     vim 
+     vim
+     tree 
      wget
      wob	# Volume BAR         
      micro
