@@ -82,7 +82,7 @@
 
   # Sys. packages (ideally only basic SW and TUI tools)
   environment.systemPackages = with pkgs; [
-	 python3
+	 (python3.withPackages (ps: with ps; [ i3ipc ]))
      vim 
      wget
      wob	# Volume BAR         
@@ -96,6 +96,7 @@
      kanshi
      grim
      slurp
+	 imagemagick
      swaylock-effects
      swayidle
      brightnessctl

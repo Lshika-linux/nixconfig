@@ -2,7 +2,13 @@
 import curses
 import subprocess
 
+from cockpit_common import query_daemon
+
 def get_wifi_info():
+    cached = query_daemon("wifi")
+    if cached is not None:
+        return cached
+
     try:
         r = subprocess.run(["iwctl", "station", "wlan0", "show"],
                           capture_output=True, text=True)
@@ -19,7 +25,12 @@ def get_wifi_info():
         pass
     return None
 
+
 def get_bt_info():
+    cached = query_daemon("bt")
+    if cached is not None:
+        return cached
+
     try:
         r = subprocess.run(["bluetoothctl", "devices", "Paired"],
                           capture_output=True, text=True)

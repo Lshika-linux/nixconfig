@@ -1,4 +1,8 @@
-{ config, pkgs, ... }: {
+{ config, pkgs, ... }: 
+let
+  cockpitPython = pkgs.python3.withPackages (ps: with ps; [ i3ipc ]);
+in
+{
 
 home.file."scripts_sway/powermenu.py" = {
   executable = true;
@@ -265,6 +269,69 @@ home.file."scripts_sway/raficalendar.py" = {
 home.file."scripts_sway/weather.py" = {
   executable = true;
   source = ../modules/weather.py;
+};
+
+home.file."scripts_sway/cockpit_daemon.py" = {
+  executable = true;
+  source = ../modules/cockpit_daemon.py;
+};
+
+home.file."scripts_sway/cockpit_common.py" = {
+  executable = true;
+  source = ../modules/cockpit_common.py;
+};
+
+systemd.user.services.cockpit-daemon = {
+  Unit = {
+    Description = "Cockpit TUI data daemon (wifi/bt/weather cache)";
+    After = [ "graphical-session.target" ];
+    PartOf = [ "graphical-session.target" ];
+  };
+  Service = {
+    ExecStart = "${pkgs.python3}/bin/python3 %h/scripts_sway/cockpit_daemon.py";
+    Restart = "on-failure";
+    RestartSec = 2;
+  };
+  Install = {
+    WantedBy = [ "graphical-session.target" ];
+  };
+};
+
+home.file."scripts_sway/cockpit_client.py" = {
+  executable = true;
+  source = ../modules/cockpit_client.py;
+};
+
+### nova koncepce, old switcher.py!
+home.file."scripts_sway/cockpit_photographer.py" = {
+  executable = true;
+  source = ../modules/cockpit_photographer.py;
+};
+
+systemd.user.services.cockpit-photographer = {
+  Unit = {
+    Description = "Cockpit window thumbnail photographer (i3ipc events -> grim)";
+    After = [ "graphical-session.target" ];
+    PartOf = [ "graphical-session.target" ];
+  };
+  Service = {
+    ExecStart = "${cockpitPython}/bin/python3 %h/scripts_sway/cockpit_photographer.py";
+    Restart = "on-failure";
+    RestartSec = 2;
+  };
+  Install = {
+    WantedBy = [ "graphical-session.target" ];
+  };
+};
+
+home.file."scripts_sway/cockpit_dashboard.py" = {
+  executable = true;
+  source = ../modules/cockpit_dashboard.py;
+};
+
+home.file."scripts_sway/cockpit_dashboard_toggle.sh" = {
+  executable = true;
+  source = ../modules/cockpit_dashboard_toggle.sh;
 };
 
 }

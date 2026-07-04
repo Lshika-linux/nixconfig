@@ -109,6 +109,7 @@
 	    { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
 	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
+		{ command = "fullscreen enable"; criteria = { app_id = "CockpitDashboard"; }; }
 	 
 		# TOP ROW
 			    { command = "floating enable, resize set 557 367, move position 12 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "WindowSwitcher"; }; }
@@ -147,6 +148,8 @@
 		"${mod}+c" = "exec kitty --class Connectivity -e python3 ~/scripts_sway/connectivity.py";
 		"${mod}+n" = "exec kitty --class Calendar -e python3 ~/scripts_sway/raficalendar.py";
 		"${mod}+p" = "exec kitty --class Weather -e python3 ~/scripts_sway/weather.py";
+#		"${mod}+grave" = "exec python3 ~/scripts_sway/cockpit_client.py";
+		"${mod}+grave" = "exec ~/scripts_sway/cockpit_dashboard_toggle.sh";
 
         # Pohyb a zaměření oken (i3 styl + 'uring')
         "${mod}+j" = "focus left";

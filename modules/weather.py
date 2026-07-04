@@ -3,7 +3,14 @@ import curses
 import subprocess
 import json
 
+from cockpit_common import query_daemon
+
 def get_weather():
+    cached = query_daemon("weather")
+    if cached is not None:
+        return cached
+
+    # fallback: daemon neběží, fetchni přímo
     try:
         r = subprocess.run(
             ["curl", "-s", "wttr.in/?format=j1"],
@@ -40,6 +47,7 @@ def get_weather():
         return weather
     except:
         return None
+
 
 # weather condition to simple ascii icon
 def weather_icon(desc):
