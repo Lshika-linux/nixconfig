@@ -30,7 +30,6 @@ from cockpit_common import query_daemon
 HOME = os.path.expanduser("~")
 SCRIPTS = os.path.join(HOME, "scripts_sway")
 NOTES_FILE = os.path.expanduser("~/.local/share/calendar_notes.json")
-KITTY_SOCKET = "/tmp/cockpit-dashboard.sock"
 
 EXCLUDE_APP_IDS = {
     "WindowSwitcher", "Connectivity", "Weather", "TimerPicker", "StickyTimer",
@@ -609,13 +608,10 @@ def wifi_dbm_to_percent(dbm):
     return max(0, min(100, pct))
 
 
-def launch_kitty_pane(command_list):
-    """Spustí opravdový druhý kitty panel vedle dashboardu přes remote control."""
-    subprocess.run(
-        ["kitty", "@", "--to", f"unix:{KITTY_SOCKET}",
-         "launch", "--type=window", "--location=vsplit", "--bias=78"] + command_list,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+def launch_floating(program):
+    """Zavře dashboard a spustí program jako centered floating kitty okno
+    (stejný vzor jako původní connectivity.py - žádný split, žádné dorovnávání)."""
+    subprocess.Popen(["swaymsg", "exec", f"kitty --class FloatingCenter -e {program}"])
 
 
 # ---------- pravý panel: app launcher (render + vlastní smyčka) ----------
@@ -821,7 +817,7 @@ def main(stdscr):
             render_timer(stdscr, default_timer_values, -1, cy0, cx0, cwidth, cheight, interactive=False)
         elif kind in ("wifi", "bt"):
             safe_addstr(stdscr, h // 2, cx0 + cwidth // 2 - 10,
-                        "Enter to open a real terminal panel", curses.color_pair(2))
+                        "Enter to open (closes dashboard)", curses.color_pair(2))
         elif kind == "power":
             safe_addstr(stdscr, h // 2, cx0 + cwidth // 2 - 12,
                         "Enter or shortcut to confirm", curses.color_pair(5))
@@ -875,9 +871,11 @@ def main(stdscr):
                     if result == "started":
                         return
             elif kind == "wifi":
-                launch_kitty_pane(["impala"])
+                launch_floating("impala")
+                return
             elif kind == "bt":
-                launch_kitty_pane(["bluetuith"])
+                launch_floating("bluetuith")
+                return
             elif kind == "power":
                 for _k, name_, cmd_ in POWER_OPTIONS:
                     if name_ == name:
