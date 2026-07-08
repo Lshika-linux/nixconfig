@@ -24,6 +24,9 @@ import json
 import os
 import calendar
 import datetime
+import threading
+import time
+import re
 
 from cockpit_common import query_daemon
 
@@ -55,6 +58,34 @@ POWER_OPTIONS = [
     ("r", "Reboot", ["systemctl", "reboot"]),
     ("p", "Shutdown", ["systemctl", "poweroff"]),
 ]
+
+# Poznámka: obyčejné unicode emoji, aby fungovaly bez závislosti na nerd fontu.
+# Pokud chceš nerd-font ikony (sedí líp k tvému stylu u connectivity.py), stačí je tu vyměnit.
+POWER_ICONS = {
+    "Lock": "🔒",
+    "Sleep": "💤",
+    "Logout": "🚪",
+    "Reboot": "🔁",
+    "Shutdown": "⏻",
+}
+
+
+def draw_power_preview(stdscr, name, y0, x0, width, height):
+    """Velká ikonka + rozšířený nadpis - curses neumí škálovat font,
+    takže 'velké' = výrazný glyph + prostor kolem + roztažené písmenka."""
+    icon = POWER_ICONS.get(name, "?")
+    danger = name in ("Shutdown", "Reboot", "Logout")
+    color = curses.color_pair(5) | curses.A_BOLD if danger else curses.color_pair(3) | curses.A_BOLD
+
+    cy = y0 + height // 2 - 2
+    safe_addstr(stdscr, cy, x0 + width // 2 - 1, icon, color)
+
+    label = " ".join(name.upper())
+    safe_addstr(stdscr, cy + 3, x0 + width // 2 - len(label) // 2, label, color)
+
+    shortcut = next((k for k, n, _c in POWER_OPTIONS if n == name), "?")
+    hint = f"Enter or [{shortcut}] to confirm"
+    safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hint) // 2, hint, curses.color_pair(2))
 
 
 # ---------- weather (z weather.py) ----------
@@ -591,12 +622,27 @@ def run_timer(stdscr, y0, x0, width, height):
 
 # ---------- connectivity: pinnuté WiFi/BT boxíky nad power menu ----------
 
+_status_cache = {"wifi": (None, 0.0), "bt": (None, 0.0)}
+_STATUS_CACHE_TTL = 2  # sekundy - stejný princip jako u _wifi_preview_cache níž,
+                        # ať se daemon nedotazuje 3x/s při 300ms refresh tiku
+
+
+def _cached_query_daemon(kind):
+    data, ts = _status_cache[kind]
+    now = time.time()
+    if now - ts < _STATUS_CACHE_TTL:
+        return data
+    data = query_daemon(kind)
+    _status_cache[kind] = (data, now)
+    return data
+
+
 def get_wifi_info():
-    return query_daemon("wifi")
+    return _cached_query_daemon("wifi")
 
 
 def get_bt_info():
-    return query_daemon("bt")
+    return _cached_query_daemon("bt")
 
 
 def wifi_dbm_to_percent(dbm):
@@ -608,10 +654,165 @@ def wifi_dbm_to_percent(dbm):
     return max(0, min(100, pct))
 
 
-def launch_floating(program):
-    """Zavře dashboard a spustí program jako centered floating kitty okno
-    (stejný vzor jako původní connectivity.py - žádný split, žádné dorovnávání)."""
-    subprocess.Popen(["swaymsg", "exec", f"kitty --class FloatingCenter -e {program}"])
+BT_DEVICE_MAC = "1C:6E:4C:9C:D0:41"  # MAJOR IV sluchátka
+
+# Stav posledního pokusu o připojení - dřív se chyby prostě zahodily
+# (bare except: pass), takže "nic se nestalo" bylo doslova pravda - žádná
+# zpětná vazba, i když connect selhal. Teď se stav ukazuje přímo v boxíku.
+CONN_BOX_H = 3
+CONN_STATUS_TTL = 6  # sekund, jak dlouho zůstane ok/error zobrazené než zmizí
+_wifi_conn_state = {"status": "idle", "msg": "", "ts": 0.0}
+_bt_conn_state = {"status": "idle", "msg": "", "ts": 0.0}
+
+
+def _conn_status_line(state):
+    """Vrátí (status, msg) k zobrazení, nebo (None, None) když není co hlásit
+    (idle, nebo ok/error co už vypršelo)."""
+    if state["status"] == "connecting":
+        return state["status"], state["msg"]
+    if state["status"] in ("ok", "error") and time.time() - state["ts"] < CONN_STATUS_TTL:
+        return state["status"], state["msg"]
+    return None, None
+
+
+def _last_line(text):
+    lines = [l.strip() for l in _strip_ansi(text).strip().splitlines() if l.strip()]
+    return lines[-1] if lines else "failed"
+
+
+def connect_bluetooth_device(mac):
+    """Připojí konkrétní BT zařízení na pozadí, dashboard zůstává otevřený -
+    stav (baterie/connected tečka) se dotáhne sám při dalším refreshi daemona.
+    Výsledek (ok/error + hlášku z bluetoothctl) hlásí do _bt_conn_state."""
+    _bt_conn_state.update(status="connecting", msg="connecting…", ts=time.time())
+
+    def worker():
+        try:
+            r = subprocess.run(["bluetoothctl", "connect", mac], timeout=10,
+                                capture_output=True, text=True)
+            if r.returncode == 0:
+                _bt_conn_state.update(status="ok", msg="connected", ts=time.time())
+            else:
+                _bt_conn_state.update(status="error",
+                                       msg=_last_line(r.stdout + r.stderr)[:40], ts=time.time())
+        except Exception as e:
+            _bt_conn_state.update(status="error", msg=str(e)[:40], ts=time.time())
+    threading.Thread(target=worker, daemon=True).start()
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _strip_ansi(text):
+    """iwctl barví výstup i když neběží v tty (přes subprocess), takže řádky
+    obsahují escape sekvence jako '\\x1b[90m'. Bez odstranění to rozbije
+    detekci oddělovacího řádku ('----') - ten pak nezačíná na '-' ale na
+    escape kód, propadne filtrem a naparsuje se jako neplatný název sítě."""
+    return _ANSI_RE.sub("", text)
+
+
+def _parse_iwctl_network_column(line):
+    """iwctl tabulky mají sloupce oddělené 2+ mezerami. Aktuálně připojená síť
+    má navíc prefix '>' - ten musí pryč PŘED splitem, jinak se '>' sám stane
+    prvním 'sloupcem' (protože za ním jsou taky 2+ mezery kvůli zarovnání)."""
+    line = line.strip()
+    if line.startswith(">"):
+        line = line[1:].strip()
+    parts = re.split(r"\s{2,}", line)
+    if not parts or not parts[0]:
+        return None
+    return parts[0].strip()
+
+
+def get_available_wifi_networks():
+    """Seznam SSID z posledního skenu, v pořadí jak je iwctl vrací (běžně dle síly signálu)."""
+    try:
+        r = subprocess.run(["iwctl", "station", "wlan0", "get-networks"],
+                            capture_output=True, text=True, timeout=10)
+    except Exception:
+        return []
+    names = []
+    for line in _strip_ansi(r.stdout).split("\n"):
+        line = line.strip()
+        if not line or line.startswith("-") or "Network name" in line or "Available" in line:
+            continue
+        name = _parse_iwctl_network_column(line)
+        if name:
+            names.append(name)
+    return names
+
+
+def get_known_wifi_networks():
+    try:
+        r = subprocess.run(["iwctl", "known-networks", "list"],
+                            capture_output=True, text=True, timeout=5)
+    except Exception:
+        return []
+    names = []
+    for line in _strip_ansi(r.stdout).split("\n"):
+        line = line.strip()
+        if not line or line.startswith("-") or line.startswith("Name") or "Known Networks" in line:
+            continue
+        name = _parse_iwctl_network_column(line)
+        if name:
+            names.append(name)
+    return names
+
+
+_wifi_preview_cache = {"ssid": None, "ts": 0.0}
+
+
+def get_best_known_available_wifi():
+    """Nejsilnější dostupná known síť BEZ spouštění nového skenu (čte jen
+    poslední výsledky iwctl, je to rychlé) - používá se pro živý náhled
+    v boxíku. Krátce cachováno (2s), ať se subprocess netočí při každém
+    překreslení."""
+    now = time.time()
+    if now - _wifi_preview_cache["ts"] < 2:
+        return _wifi_preview_cache["ssid"]
+    available = get_available_wifi_networks()
+    known = set(get_known_wifi_networks())
+    best = next((s for s in available if s in known), None)
+    _wifi_preview_cache["ssid"] = best
+    _wifi_preview_cache["ts"] = now
+    return best
+
+
+def connect_best_known_wifi(ssid=None):
+    """Připojí danou síť (pokud známe z náhledu) hned, jinak jako fallback
+    Scan -> najde průnik dostupných a known sítí -> připojí první shodu
+    (iwctl řadí get-networks zhruba podle síly signálu, takže první shoda
+    by měla být nejsilnější dostupná known síť). Běží na pozadí.
+    Výsledek (ok/error + hlášku z iwctl) hlásí do _wifi_conn_state, takže
+    "nic se nestalo" po Enteru je teď vidět proč - selhání se dřív tiše
+    zahazovalo (bare except: pass)."""
+    _wifi_conn_state.update(status="connecting",
+                             msg=f"connecting {ssid}…" if ssid else "scanning…", ts=time.time())
+
+    def worker():
+        try:
+            target = ssid
+            if not target:
+                subprocess.run(["iwctl", "station", "wlan0", "scan"], timeout=10,
+                                capture_output=True)
+                time.sleep(2)  # dát skenu chvíli, ať se stihne naplnit
+                available = get_available_wifi_networks()
+                known = set(get_known_wifi_networks())
+                target = next((s for s in available if s in known), None)
+            if not target:
+                _wifi_conn_state.update(status="error", msg="no known network in range", ts=time.time())
+                return
+            _wifi_conn_state.update(status="connecting", msg=f"connecting {target}…", ts=time.time())
+            r = subprocess.run(["iwctl", "station", "wlan0", "connect", target],
+                                timeout=15, capture_output=True, text=True)
+            if r.returncode == 0:
+                _wifi_conn_state.update(status="ok", msg=f"connected {target}", ts=time.time())
+            else:
+                _wifi_conn_state.update(status="error",
+                                         msg=_last_line(r.stdout + r.stderr)[:40], ts=time.time())
+        except Exception as e:
+            _wifi_conn_state.update(status="error", msg=str(e)[:40], ts=time.time())
+    threading.Thread(target=worker, daemon=True).start()
 
 
 # ---------- pravý panel: app launcher (render + vlastní smyčka) ----------
@@ -676,7 +877,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     draw_box(stdscr, y0, x0, height, width, focused)
 
     power_block_h = len(POWER_OPTIONS) + 2
-    conn_block_h = 7  # 2x box (výška 3) + 1 řádek odděleného odstupu
+    conn_block_h = 2 * CONN_BOX_H + 1  # 2x box + 1 řádek odděleného odstupu
     content_h = height - 2 - power_block_h - conn_block_h
     band_h = max(content_h // 3, 5)
 
@@ -722,25 +923,65 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     wifi_idx = next((i for i, it in enumerate(items) if it[1] == "wifi"), None)
     bt_idx = next((i for i, it in enumerate(items) if it[1] == "bt"), None)
 
-    bt_box_y = power_y - 1 - 3
-    wifi_box_y = bt_box_y - 3
+    bt_box_y = power_y - 1 - CONN_BOX_H
+    wifi_box_y = bt_box_y - CONN_BOX_H
 
+    def _status_color(status):
+        if status == "connecting":
+            return curses.color_pair(2) | curses.A_BOLD  # yellow
+        if status == "ok":
+            return curses.color_pair(4) | curses.A_BOLD  # green
+        return curses.color_pair(5) | curses.A_BOLD       # red (error)
+
+    def _status_dot(status):
+        return {"connecting": "◌", "ok": "●", "error": "✕"}.get(status, "●")
+
+    wifi_focused = selected == wifi_idx
     wifi_data = get_wifi_info()
-    draw_box(stdscr, wifi_box_y, x0, 3, width, selected == wifi_idx, "WiFi")
-    if wifi_data:
-        pct = wifi_dbm_to_percent(wifi_data.get("rssi"))
-        pct_str = f"{pct}%" if pct is not None else "?"
-        safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, f"● {pct_str}", curses.color_pair(4) | curses.A_BOLD)
+    draw_box(stdscr, wifi_box_y, x0, CONN_BOX_H, width, wifi_focused, "WiFi")
+    wifi_status, wifi_msg = _conn_status_line(_wifi_conn_state)
+    if wifi_status:
+        line = f"{_status_dot(wifi_status)} {wifi_msg}"
+        safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, line[:width - 4], _status_color(wifi_status))
     else:
-        safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, "○ --", curses.color_pair(5))
+        if wifi_data:
+            pct = wifi_dbm_to_percent(wifi_data.get("rssi"))
+            base = f"● {pct}%" if pct is not None else "● ?"
+            base_color = curses.color_pair(4) | curses.A_BOLD
+        else:
+            base = "○ --"
+            base_color = curses.color_pair(5)
+        if wifi_focused:
+            wifi_hint_ssid = get_best_known_available_wifi()
+            hint = f"connect {wifi_hint_ssid}" if wifi_hint_ssid else "connect best known"
+            safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, base, base_color)
+            safe_addstr(stdscr, wifi_box_y + 1, x0 + 2 + len(base) + 2,
+                        hint[:max(width - 4 - len(base) - 2, 0)], curses.color_pair(6))
+        else:
+            safe_addstr(stdscr, wifi_box_y + 1, x0 + 2, base, base_color)
 
+    bt_focused = selected == bt_idx
     bt_data = get_bt_info()
-    draw_box(stdscr, bt_box_y, x0, 3, width, selected == bt_idx, "Bluetooth")
-    if bt_data:
-        bat_str = bt_data.get("battery") or "--"
-        safe_addstr(stdscr, bt_box_y + 1, x0 + 2, f"● {bat_str}", curses.color_pair(4) | curses.A_BOLD)
+    draw_box(stdscr, bt_box_y, x0, CONN_BOX_H, width, bt_focused, "Bluetooth")
+    bt_status, bt_msg = _conn_status_line(_bt_conn_state)
+    if bt_status:
+        line = f"{_status_dot(bt_status)} {bt_msg}"
+        safe_addstr(stdscr, bt_box_y + 1, x0 + 2, line[:width - 4], _status_color(bt_status))
     else:
-        safe_addstr(stdscr, bt_box_y + 1, x0 + 2, "○ --", curses.color_pair(5))
+        if bt_data:
+            bat_str = bt_data.get("battery") or "--"
+            base = f"● {bat_str}"
+            base_color = curses.color_pair(4) | curses.A_BOLD
+        else:
+            base = "○ --"
+            base_color = curses.color_pair(5)
+        if bt_focused:
+            hint = "connect MAJOR IV"
+            safe_addstr(stdscr, bt_box_y + 1, x0 + 2, base, base_color)
+            safe_addstr(stdscr, bt_box_y + 1, x0 + 2 + len(base) + 2,
+                        hint[:max(width - 4 - len(base) - 2, 0)], curses.color_pair(6))
+        else:
+            safe_addstr(stdscr, bt_box_y + 1, x0 + 2, base, base_color)
 
     # --- pinnuté PowerMenu, beze změny ---
     safe_addstr(stdscr, power_y - 1, x0 + 2, "─" * (width - 4), curses.color_pair(6))
@@ -766,6 +1007,9 @@ def main(stdscr):
     curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_CYAN)
     curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)
     stdscr.keypad(True)
+    stdscr.timeout(300)  # non-blocking getch -> dashboard se sám překresluje
+                          # i bez stisku klávesy (WiFi signál / BT baterie
+                          # a stav se doťáhnou téměř okamžitě po Enteru)
 
     apps = get_running_apps()
 
@@ -790,7 +1034,7 @@ def main(stdscr):
     WEATHER_STRIP_H = 6
 
     while True:
-        stdscr.clear()
+        stdscr.erase()  # ne clear() - to force-touchne celé okno a zbytečně bliká
         h, w = stdscr.getmaxyx()
         side_w = max(w // 5, 20)
         cx0, cy0 = side_w + 1, 1
@@ -816,11 +1060,9 @@ def main(stdscr):
         elif kind == "timer":
             render_timer(stdscr, default_timer_values, -1, cy0, cx0, cwidth, cheight, interactive=False)
         elif kind in ("wifi", "bt"):
-            safe_addstr(stdscr, h // 2, cx0 + cwidth // 2 - 10,
-                        "Enter to open (closes dashboard)", curses.color_pair(2))
+            pass  # stav a hint se teď ukazují přímo v pinnutém boxíku v sidebaru
         elif kind == "power":
-            safe_addstr(stdscr, h // 2, cx0 + cwidth // 2 - 12,
-                        "Enter or shortcut to confirm", curses.color_pair(5))
+            draw_power_preview(stdscr, name, cy0, cx0, cwidth, cheight)
 
         hints = "TAB navigate   ENTER select   ESC close   l/s/o/r/p power"
         safe_addstr(stdscr, h - 1, w // 2 - len(hints) // 2, hints, curses.color_pair(2))
@@ -871,11 +1113,9 @@ def main(stdscr):
                     if result == "started":
                         return
             elif kind == "wifi":
-                launch_floating("impala")
-                return
+                connect_best_known_wifi(get_best_known_available_wifi())
             elif kind == "bt":
-                launch_floating("bluetuith")
-                return
+                connect_bluetooth_device(BT_DEVICE_MAC)
             elif kind == "power":
                 for _k, name_, cmd_ in POWER_OPTIONS:
                     if name_ == name:
