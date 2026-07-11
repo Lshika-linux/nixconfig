@@ -3,17 +3,26 @@
 cockpit_dashboard.py — fullscreen dashboard (Win+grave).
 
 Levý sloupec (1/5): AppLauncher (úplně nahoře) -> běžící appky (app_id) ->
-Weather / Calendar / Timer / Connectivity -> pinnuté PowerMenu dole.
+pinnuté Timer/WiFi/Bluetooth boxíky -> pinnuté PowerMenu dole.
 Fokus při startu naskočí na první appku (AppLauncher je jen o Shift+Tab výš).
 
 Pravá plocha (4/5): kontextový obsah podle vybrané položky - grid oken,
-plné počasí, kalendář s poznámkami, timer picker, connectivity chooser.
+launcher, power preview - a dole napevno pruh Calendar (pasivní náhled
+měsíce) + Weather, max 8 řádků na výšku.
 
-Connectivity je jediná věc, co NEJDE vykreslit v curses - impala/bluetuith
-jsou vlastní interaktivní TUI. Řeší se přes kitty remote control: dashboard
-běží v kitty s --listen-on, a při volbě WiFi/BT se vedle spustí OPRAVDOVÝ
-druhý kitty panel (kitty @ launch --location=vsplit) se skutečným impala/
-bluetuith procesem. Žádná emulace terminálu, je to nativní kitty split.
+Calendar NENÍ v sidebaru / Tab cyklení - je jen ten pasivní náhled dole a
+klávesa 'C' (na úrovni l/s/o/r/p), co odkudkoliv otevře interaktivní overlay
+(run_calendar) přes hlavní obsahovou plochu.
+
+Timer je pinnutý boxík (jako WiFi/BT) - žádný samostatný fokus mode, h:m:s
+se nastavuje šipkama přímo když je boxík vybraný přes Tab, Enter spustí
+StickyTimer (termdown v kitty) a zavře dashboard.
+
+Connectivity (WiFi/BT) je jediná věc, co NEJDE vykreslit v curses - impala/
+bluetuith jsou vlastní interaktivní TUI. Řeší se přes kitty remote control:
+dashboard běží v kitty s --listen-on, a při volbě WiFi/BT se vedle spustí
+OPRAVDOVÝ druhý kitty panel (kitty @ launch --location=vsplit) se skutečným
+impala/bluetuith procesem. Žádná emulace terminálu, je to nativní kitty split.
 
 PowerMenu jde spustit odkudkoliv v dashboardu klávesou (l/s/o/r/p), navíc
 je i součástí Tab cyklení jako pinnuté položky dole v levém sloupci.
@@ -91,13 +100,20 @@ def draw_power_preview(stdscr, name, y0, x0, width, height):
 # ---------- weather (z weather.py) ----------
 
 def weather_icon(desc):
+    """VS16 (\ufe0f) na konci žádá emoji-presentation formu místo textové -
+    tvůj PowerMenu už plain emoji (🔒💤🚪) renderuje bez problémů, takže by tohle
+    mělo dát barevnější/větší ikonky než ty tenké textové glyphy (☀ bez VS16).
+    Riziko: pokud font/kitty nemá barevný emoji fallback, může se místo toho
+    objevit tofu čtvereček nebo se ikonka stane 2 buňky širokou a rozjede
+    zarovnání vedle sebe stojících řádků - kdyby se to stalo, dej vědět a
+    vrátíme se k plain textovým glyphům (bez \ufe0f)."""
     desc = desc.lower()
-    if "thunder" in desc: return "⚡"
-    if "snow" in desc: return "❄"
-    if "rain" in desc or "drizzle" in desc: return "🌧"
-    if "cloud" in desc or "overcast" in desc: return "☁"
-    if "fog" in desc or "mist" in desc: return "🌫"
-    if "sunny" in desc or "clear" in desc: return "☀"
+    if "thunder" in desc: return "⛈️"
+    if "snow" in desc: return "❄️"
+    if "rain" in desc or "drizzle" in desc: return "🌧️"
+    if "cloud" in desc or "overcast" in desc: return "☁️"
+    if "fog" in desc or "mist" in desc: return "🌫️"
+    if "sunny" in desc or "clear" in desc: return "☀️"
     if "partly" in desc: return "⛅"
     return "~"
 
@@ -177,6 +193,19 @@ def save_notes(notes):
 
 def note_key(year, month, day):
     return f"{year}-{month:02d}-{day:02d}"
+
+
+_notes_cache = {"data": {}, "ts": 0.0}
+
+
+def load_notes_cached():
+    """Pro pasivní strip dole, co se překresluje každých 300ms - není důvod
+    číst soubor z disku tak často, poznámky se stejně nemění mimo run_calendar."""
+    now = time.time()
+    if now - _notes_cache["ts"] > 2:
+        _notes_cache["data"] = load_notes()
+        _notes_cache["ts"] = now
+    return _notes_cache["data"]
 
 
 # ---------- app launcher (generický scan .desktop souborů) ----------
@@ -273,32 +302,84 @@ def draw_grid(stdscr, windows, selected, y0, x0, width, height):
 # ---------- pravý panel: weather ----------
 
 def draw_weather_strip(stdscr, y0, x0, width, height):
-    """Trvalý kompaktní blok počasí - vždy viditelný dole pod hlavním obsahem."""
+    """Trvalý kompaktní blok počasí - vždy viditelný dole pod hlavním obsahem.
+    Obsah (max 3 řádky) se vertikálně centruje v dostupné výšce boxu."""
     draw_box(stdscr, y0, x0, height, width, False, "Weather")
     data = query_daemon("weather")
     if not data:
         safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - 4, "no data", curses.color_pair(5))
         return
 
+    has_forecast = bool(data.get("forecast")) and height >= 5
+    n_lines = 3 if has_forecast else 2
+    content_rows = height - 2
+    start = y0 + 1 + max((content_rows - n_lines) // 2, 0)
+
     icon = weather_icon(data["desc"])
     line1 = f"{data['city']}   {icon} {data['temp']}°C   {data['desc']}"
-    safe_addstr(stdscr, y0 + 1, x0 + width // 2 - len(line1) // 2, line1,
+    safe_addstr(stdscr, start, x0 + width // 2 - len(line1) // 2, line1,
                 curses.color_pair(3) | curses.A_BOLD)
 
     line2 = f"feels {data['feels']}°C   wind {data['wind']} km/h   humidity {data['humidity']}%"
-    safe_addstr(stdscr, y0 + 2, x0 + width // 2 - len(line2) // 2, line2, curses.color_pair(6))
+    safe_addstr(stdscr, start + 1, x0 + width // 2 - len(line2) // 2, line2, curses.color_pair(6))
 
-    if data.get("forecast") and height >= 5:
+    if has_forecast:
         parts = []
         for day in data["forecast"]:
             date_parts = day["date"].split("-")
             date_short = f"{date_parts[2]}.{date_parts[1]}"
             parts.append(f"{date_short} {weather_icon(day['desc'])} {day['min']}-{day['max']}°C")
         line3 = "   ".join(parts)
-        safe_addstr(stdscr, y0 + 3, x0 + width // 2 - len(line3) // 2, line3, curses.color_pair(1))
+        safe_addstr(stdscr, start + 2, x0 + width // 2 - len(line3) // 2, line3, curses.color_pair(1))
 
 
-# ---------- pravý panel: kalendář (render + interaktivní smyčka) ----------
+# ---------- pravý panel: kompaktní kalendář vedle weather (pasivní náhled) ----------
+
+def render_calendar_strip(stdscr, year, month, today_day, notes, y0, x0, width, height):
+    """Pasivní náhled celého měsíce, pořád vidět vedle Weather. Box má vlastní
+    titulek "[C]alendar" v horním rámečku (stejně jako "Weather"), hlavička
+    dnů (Mo..Su) je normální řádek uvnitř boxu nad mřížkou. Zbylý prostor nad
+    6 týdny + hlavičkou se rozloží jako padding, ať mřížka nelepí nahoře."""
+    draw_box(stdscr, y0, x0, height, width, False, "[C]alendar")
+    weeks = calendar.monthcalendar(year, month)
+    while len(weeks) < 6:
+        weeks.append([0] * 7)
+
+    col_w = max(min(width // 7, 6), 3)
+    grid_w = col_w * 7
+    grid_x0 = x0 + 1 + max((width - 2 - grid_w) // 2, 0)
+    content_rows = height - 2
+    pad_top = max((content_rows - 8) // 2, 0)  # 8 = 1 volný řádek + hlavička + 6 týdnů
+    header_y = y0 + 1 + pad_top + 1
+    row0 = header_y + 1
+
+    for i, wd in enumerate(WEEKDAY_NAMES):
+        x = grid_x0 + i * col_w + col_w // 2 - 1
+        safe_addstr(stdscr, header_y, x, wd, curses.color_pair(4) | curses.A_BOLD)
+
+    notes_days = set()
+    for k, v in notes.items():
+        if not v:
+            continue
+        try:
+            ky, km, kd = (int(p) for p in k.split("-"))
+        except ValueError:
+            continue
+        if ky == year and km == month:
+            notes_days.add(kd)
+
+    for row in range(6):
+        week = weeks[row] if row < len(weeks) else [0] * 7
+        for col, d in enumerate(week):
+            if d == 0:
+                continue
+            x = grid_x0 + col * col_w + col_w // 2 - 1
+            y = row0 + row
+            label = f"{d}{'·' if d in notes_days else ''}"
+            style = curses.color_pair(3) | curses.A_REVERSE if d == today_day else curses.color_pair(1) | curses.A_BOLD
+            safe_addstr(stdscr, y, x, label[:col_w], style)
+
+
 
 WEEKDAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
 NOTES_PANEL_H = 9  # kolik řádků dole je vyhrazeno na seznam poznámek
@@ -539,85 +620,19 @@ def run_calendar(stdscr, y0, x0, width, height):
 
 # ---------- pravý panel: timer (render + interaktivní smyčka) ----------
 
-QUICK_MINUTES = [5, 10, 20]
 TIMER_LABELS = ["HH", "MM", "SS"]
+TIMER_LIMITS = [99, 59, 59]
 
 
-def render_timer(stdscr, values, selected, y0, x0, width, height, interactive=True):
-    for i in range(height):
-        safe_addstr(stdscr, y0 + i, x0, " " * width)
-
-    title = "SET TIMER"
-    cy = y0 + height // 2 - 3
-    safe_addstr(stdscr, cy, x0 + width // 2 - len(title) // 2, title, curses.color_pair(2) | curses.A_BOLD)
-
-    x_start = x0 + width // 2 - 10
-    ty = cy + 2
-    for i, (val, label) in enumerate(zip(values, TIMER_LABELS)):
-        segment = f" {val:02d} "
-        x = x_start + i * 7
-        style = curses.color_pair(3) | curses.A_BOLD | curses.A_REVERSE if (interactive and i == selected) \
-            else curses.color_pair(1) | curses.A_BOLD
-        safe_addstr(stdscr, ty, x, segment, style)
-        if i < 2:
-            safe_addstr(stdscr, ty, x + 4, " : ", curses.color_pair(1))
-    for i, label in enumerate(TIMER_LABELS):
-        x = x_start + i * 7 + 1
-        safe_addstr(stdscr, ty + 1, x, label,
-                    curses.color_pair(2) if (interactive and i == selected) else curses.color_pair(3))
-
-    qy = ty + 3
-    qx_start = x0 + width // 2 - 12
-    for i, mins in enumerate(QUICK_MINUTES):
-        idx = 3 + i
-        label = f" +{mins}m "
-        x = qx_start + i * 9
-        style = curses.color_pair(3) | curses.A_BOLD | curses.A_REVERSE if (interactive and idx == selected) \
-            else curses.color_pair(6)
-        safe_addstr(stdscr, qy, x, label, style)
-
-    hints = "left/right: pick   up/down: adjust   Enter: add/start   Esc: cancel" if interactive \
-        else "Enter to set timer"
-    safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
-
-
-def run_timer(stdscr, y0, x0, width, height):
-    """6 prvků: 0-2 = HH/MM/SS, 3-5 = +5/+10/+20 quick-add.
-    Enter na 0-2 potvrdí a spustí StickyTimer. Enter na 3-5 přičte minuty."""
-    values = [0, 0, 0]
-    limits = [99, 59, 59]
-    quick = QUICK_MINUTES
-    selected = 0
-
-    while True:
-        render_timer(stdscr, values, selected, y0, x0, width, height)
-        stdscr.refresh()
-        key = stdscr.getch()
-
-        if key == curses.KEY_UP and selected < 3:
-            values[selected] = (values[selected] + 1) % (limits[selected] + 1)
-        elif key == curses.KEY_DOWN and selected < 3:
-            values[selected] = (values[selected] - 1) % (limits[selected] + 1)
-        elif key == curses.KEY_RIGHT:
-            selected = (selected + 1) % 6
-        elif key == curses.KEY_LEFT:
-            selected = (selected - 1) % 6
-        elif key in (10, 13):
-            if selected < 3:
-                total = values[0] * 3600 + values[1] * 60 + values[2]
-                if total > 0:
-                    subprocess.Popen(["swaymsg", "exec",
-                        f"kitty --class StickyTimer --override font_size=30 -e termdown {total}"])
-                    return "started"
-            else:
-                add_min = quick[selected - 3]
-                total = values[0] * 3600 + values[1] * 60 + values[2] + add_min * 60
-                total = min(total, 99 * 3600 + 59 * 60 + 59)
-                values[0] = total // 3600
-                values[1] = (total % 3600) // 60
-                values[2] = total % 60
-        elif key == 27:
-            return None
+def start_timer(values):
+    """Spustí StickyTimer (termdown v kitty) s aktuálně nastaveným h/m/s.
+    Vrací True když se opravdu odpálil (total > 0), jinak False."""
+    total = values[0] * 3600 + values[1] * 60 + values[2]
+    if total <= 0:
+        return False
+    subprocess.Popen(["swaymsg", "exec",
+        f"kitty --class StickyTimer --override font_size=30 -e termdown {total}"])
+    return True
 
 
 # ---------- connectivity: pinnuté WiFi/BT boxíky nad power menu ----------
@@ -873,22 +888,20 @@ def run_launcher(stdscr, y0, x0, width, height):
 # ---------- sidebar ----------
 
 def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
-                  desktop_apps_preview, focused=True):
+                  desktop_apps_preview, timer_values, timer_field, focused=True):
     draw_box(stdscr, y0, x0, height, width, focused)
 
     power_block_h = len(POWER_OPTIONS) + 2
-    conn_block_h = 2 * CONN_BOX_H + 1  # 2x box + 1 řádek odděleného odstupu
+    conn_block_h = 3 * CONN_BOX_H + 1  # Timer + WiFi + BT boxy + 1 řádek odděleného odstupu
     content_h = height - 2 - power_block_h - conn_block_h
-    band_h = max(content_h // 3, 5)
+    band_h = max(content_h // 2, 5)
 
     band1_y = y0 + 1
     band2_y = band1_y + band_h
-    band3_y = band2_y + band_h
 
     app_items = [(i, it) for i, it in enumerate(items) if it[1] == "app"]
-    func_items = [(i, it) for i, it in enumerate(items) if it[1] in ("calendar", "timer")]
 
-    # --- horní třetina: App Launcher - vždy vidět, search pole + náhled seznamu ---
+    # --- horní polovina: App Launcher - vždy vidět, search pole + náhled seznamu ---
     safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
     launcher_focused = (selected == 0)
     prompt_style = curses.color_pair(3) | curses.A_REVERSE if launcher_focused else curses.color_pair(1)
@@ -896,9 +909,9 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     for i, (name, _cmd) in enumerate(desktop_apps_preview[:band_h - 3]):
         safe_addstr(stdscr, band1_y + 2 + i, x0 + 2, name[:width - 4], curses.color_pair(6))
 
-    # --- prostřední třetina: Window Switcher - vždy vidět, scroll podle výběru ---
+    # --- dolní polovina: Window Switcher - vždy vidět, scroll podle výběru ---
     safe_addstr(stdscr, band2_y, x0 + 2, "── Windows ──"[:width - 4], curses.color_pair(6))
-    visible_apps = band_h - 1
+    visible_apps = height - 2 - power_block_h - conn_block_h - band_h - 1
     sel_local = next((n for n, (i, _it) in enumerate(app_items) if i == selected), None)
     offset = 0
     if sel_local is not None and len(app_items) > visible_apps:
@@ -911,20 +924,15 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     if not app_items:
         safe_addstr(stdscr, band2_y + 1, x0 + 2, "(no windows)", curses.color_pair(6))
 
-    # --- dolní třetina: zbytek funkcionalit ---
-    safe_addstr(stdscr, band3_y, x0 + 2, "── More ──"[:width - 4], curses.color_pair(6))
-    for n, (i, (name, _kind, extra)) in enumerate(func_items):
-        row = band3_y + 1 + n
-        style = curses.color_pair(3) | curses.A_REVERSE if i == selected else curses.color_pair(1)
-        safe_addstr(stdscr, row, x0 + 2, f"{name}{extra}"[:width - 4].ljust(width - 4), style)
-
-    # --- pinnuté WiFi/BT boxíky, hned nad PowerMenu ---
+    # --- pinnuté Timer/WiFi/BT boxíky, hned nad PowerMenu ---
     power_y = y0 + height - 1 - len(POWER_OPTIONS)
+    timer_idx = next((i for i, it in enumerate(items) if it[1] == "timer"), None)
     wifi_idx = next((i for i, it in enumerate(items) if it[1] == "wifi"), None)
     bt_idx = next((i for i, it in enumerate(items) if it[1] == "bt"), None)
 
     bt_box_y = power_y - 1 - CONN_BOX_H
     wifi_box_y = bt_box_y - CONN_BOX_H
+    timer_box_y = wifi_box_y - CONN_BOX_H
 
     def _status_color(status):
         if status == "connecting":
@@ -935,6 +943,23 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
 
     def _status_dot(status):
         return {"connecting": "◌", "ok": "●", "error": "✕"}.get(status, "●")
+
+    timer_focused = selected == timer_idx
+    draw_box(stdscr, timer_box_y, x0, CONN_BOX_H, width, timer_focused, "Timer")
+    x = x0 + 2
+    for i, (val, label) in enumerate(zip(timer_values, TIMER_LABELS)):
+        style = curses.color_pair(3) | curses.A_REVERSE if (timer_focused and i == timer_field) \
+            else curses.color_pair(1) | curses.A_BOLD
+        safe_addstr(stdscr, timer_box_y + 1, x, f"{val:02d}", style)
+        x += 2
+        if i < 2:
+            safe_addstr(stdscr, timer_box_y + 1, x, ":", curses.color_pair(6))
+            x += 1
+    if timer_focused:
+        hint = "  Enter: start"
+        safe_addstr(stdscr, timer_box_y + 1, x, hint[:max(width - 4 - (x - x0 - 2), 0)],
+                    curses.color_pair(6))
+
 
     wifi_focused = selected == wifi_idx
     wifi_data = get_wifi_info()
@@ -1016,7 +1041,6 @@ def main(stdscr):
     sidebar_items = [("App Launcher", "launcher", "")]
     sidebar_items += [(name, "app", f" ({len(wins)})") for name, wins in sorted(apps.items())]
     sidebar_items += [
-        ("Calendar", "calendar", ""),
         ("Timer", "timer", ""),
         ("WiFi", "wifi", ""),
         ("Bluetooth", "bt", ""),
@@ -1030,8 +1054,9 @@ def main(stdscr):
     power_keys = {k: cmd for k, _n, cmd in POWER_OPTIONS}
 
     desktop_apps_cache = scan_desktop_apps()
-    default_timer_values = [0, 0, 0]
-    WEATHER_STRIP_H = 6
+    timer_values = [0, 0, 0]
+    timer_field = 0
+    WEATHER_STRIP_H = 10  # o 2 řádky vyšší než předtím - dává gridu dýchací prostor
 
     while True:
         stdscr.erase()  # ne clear() - to force-touchne celé okno a zbytečně bliká
@@ -1040,12 +1065,18 @@ def main(stdscr):
         cx0, cy0 = side_w + 1, 1
         cwidth = (w - side_w) - 2
         cheight = (h - 3) - WEATHER_STRIP_H
-        weather_y = cy0 + cheight
+        strip_y = cy0 + cheight
+        cal_w = (cwidth - 1) * 2 // 5  # poměr 2:3 kalendář:weather
+        weather_x = cx0 + cal_w + 1
+        weather_w = cwidth - cal_w - 1
 
         draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
-                     desktop_apps_cache, focused=True)
+                     desktop_apps_cache, timer_values, timer_field, focused=True)
         draw_box(stdscr, 0, side_w, h - 1, w - side_w, False)
-        draw_weather_strip(stdscr, weather_y, cx0, cwidth, WEATHER_STRIP_H)
+        today = datetime.date.today()
+        render_calendar_strip(stdscr, today.year, today.month, today.day, load_notes_cached(),
+                               strip_y, cx0, cal_w, WEATHER_STRIP_H)
+        draw_weather_strip(stdscr, strip_y, weather_x, weather_w, WEATHER_STRIP_H)
 
         name, kind, _extra = sidebar_items[sel_side]
         if kind == "app":
@@ -1053,29 +1084,32 @@ def main(stdscr):
             draw_grid(stdscr, windows, grid_sel, cy0, cx0, cwidth, cheight)
         elif kind == "launcher":
             render_launcher(stdscr, "", desktop_apps_cache, -1, cy0, cx0, cwidth, cheight, interactive=False)
-        elif kind == "calendar":
-            today = datetime.date.today()
-            render_calendar(stdscr, today.year, today.month, today.day, load_notes(),
-                             cy0, cx0, cwidth, cheight, interactive=False)
-        elif kind == "timer":
-            render_timer(stdscr, default_timer_values, -1, cy0, cx0, cwidth, cheight, interactive=False)
-        elif kind in ("wifi", "bt"):
-            pass  # stav a hint se teď ukazují přímo v pinnutém boxíku v sidebaru
+        elif kind in ("wifi", "bt", "timer"):
+            pass  # stav a ovládání se teď dějí přímo v pinnutém boxíku v sidebaru
         elif kind == "power":
             draw_power_preview(stdscr, name, cy0, cx0, cwidth, cheight)
 
-        hints = "TAB navigate   ENTER select   ESC close   l/s/o/r/p power"
+        hints = "TAB navigate   ENTER select   ESC close   l/s/o/r/p power   C calendar"
         safe_addstr(stdscr, h - 1, w // 2 - len(hints) // 2, hints, curses.color_pair(2))
 
         stdscr.refresh()
         key = stdscr.getch()
 
-        # globální power zkratky - fungují odkudkoliv v hlavní smyčce
+        # globální zkratky - fungují odkudkoliv v hlavní smyčce
         if key != -1 and 0 <= key < 256:
             ch = chr(key).lower()
             if ch in power_keys:
                 subprocess.run(power_keys[ch])
                 return
+            if ch == "c":
+                draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
+                             desktop_apps_cache, timer_values, timer_field, focused=False)
+                draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
+                stdscr.refresh()
+                run_calendar(stdscr, cy0, cx0, cwidth, cheight)
+                continue
+
+        name, kind, _extra = sidebar_items[sel_side]
 
         if key == 27:
             return
@@ -1085,33 +1119,30 @@ def main(stdscr):
         elif key == curses.KEY_BTAB:
             sel_side = (sel_side - 1) % len(sidebar_items)
             grid_sel = 0
+        elif kind == "timer" and key == curses.KEY_LEFT:
+            timer_field = (timer_field - 1) % 3
+        elif kind == "timer" and key == curses.KEY_RIGHT:
+            timer_field = (timer_field + 1) % 3
+        elif kind == "timer" and key == curses.KEY_UP:
+            timer_values[timer_field] = (timer_values[timer_field] + 1) % (TIMER_LIMITS[timer_field] + 1)
+        elif kind == "timer" and key == curses.KEY_DOWN:
+            timer_values[timer_field] = (timer_values[timer_field] - 1) % (TIMER_LIMITS[timer_field] + 1)
         elif key in (10, 13):
-            name, kind, _extra = sidebar_items[sel_side]
-            h, w = stdscr.getmaxyx()
-            side_w = max(w // 5, 20)
-            cx0, cy0 = side_w + 1, 1
-            cwidth, cheight = (w - side_w) - 2, (h - 3) - WEATHER_STRIP_H
-
             if kind == "app":
                 windows = apps.get(name, [])
                 if windows and 0 <= grid_sel < len(windows):
                     focus_window(windows[grid_sel]["con_id"])
                     return
-            elif kind in ("launcher", "calendar", "timer"):
+            elif kind == "launcher":
                 # fokus se přesouvá do obsahu - sidebar zešedne, obsah dostane zvýrazněný rámeček
                 draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
-                             desktop_apps_cache, focused=False)
+                             desktop_apps_cache, timer_values, timer_field, focused=False)
                 draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
                 stdscr.refresh()
-
-                if kind == "launcher":
-                    run_launcher(stdscr, cy0, cx0, cwidth, cheight)
-                elif kind == "calendar":
-                    run_calendar(stdscr, cy0, cx0, cwidth, cheight)
-                elif kind == "timer":
-                    result = run_timer(stdscr, cy0, cx0, cwidth, cheight)
-                    if result == "started":
-                        return
+                run_launcher(stdscr, cy0, cx0, cwidth, cheight)
+            elif kind == "timer":
+                if start_timer(timer_values):
+                    return
             elif kind == "wifi":
                 connect_best_known_wifi(get_best_known_available_wifi())
             elif kind == "bt":
