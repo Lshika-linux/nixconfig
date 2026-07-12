@@ -93,6 +93,7 @@
      curl
      wl-clipboard
 	 mc
+	 librewolf
      udiskie
      kanshi
      grim
@@ -113,6 +114,10 @@
     (nerd-fonts.hack)
   ];
 
+  environment.variables = {
+      MOZ_ENABLE_WAYLAND = "1";
+  };
+    
   # BT..
   hardware.bluetooth.enable = true;
   hardware.bluetooth.powerOnBoot = true;

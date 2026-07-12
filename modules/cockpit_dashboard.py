@@ -60,19 +60,23 @@ DESKTOP_DIRS = [
     "/usr/share/applications",
 ]
 
+def ctrl(letter):
+    """Kód, co getch() vrátí pro Ctrl+písmeno (1-26, netisknutelné - nikdy
+    nekoliduje s běžným psaním textu, na rozdíl od Shift)."""
+    return ord(letter.upper()) - 64
+
+
 POWER_OPTIONS = [
-    ("l", "Lock", ["bash", os.path.join(SCRIPTS, "lock.sh")]),
-    ("s", "Sleep", ["systemctl", "suspend"]),
-    ("o", "Logout", ["swaymsg", "exit"]),
-    ("r", "Reboot", ["systemctl", "reboot"]),
-    ("p", "Shutdown", ["systemctl", "poweroff"]),
+    ("L", "Lock", ["bash", os.path.join(SCRIPTS, "lock.sh")]),
+    ("O", "Logout", ["swaymsg", "exit"]),
+    ("R", "Reboot", ["systemctl", "reboot"]),
+    ("P", "Shutdown", ["systemctl", "poweroff"]),
 ]
 
 # Poznámka: obyčejné unicode emoji, aby fungovaly bez závislosti na nerd fontu.
 # Pokud chceš nerd-font ikony (sedí líp k tvému stylu u connectivity.py), stačí je tu vyměnit.
 POWER_ICONS = {
     "Lock": "🔒",
-    "Sleep": "💤",
     "Logout": "🚪",
     "Reboot": "🔁",
     "Shutdown": "⏻",
@@ -93,7 +97,7 @@ def draw_power_preview(stdscr, name, y0, x0, width, height):
     safe_addstr(stdscr, cy + 3, x0 + width // 2 - len(label) // 2, label, color)
 
     shortcut = next((k for k, n, _c in POWER_OPTIONS if n == name), "?")
-    hint = f"Enter or [{shortcut}] to confirm"
+    hint = f"Enter or [^{shortcut}] to confirm"
     safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hint) // 2, hint, curses.color_pair(2))
 
 
@@ -337,10 +341,10 @@ def draw_weather_strip(stdscr, y0, x0, width, height):
 
 def render_calendar_strip(stdscr, year, month, today_day, notes, y0, x0, width, height):
     """Pasivní náhled celého měsíce, pořád vidět vedle Weather. Box má vlastní
-    titulek "[C]alendar" v horním rámečku (stejně jako "Weather"), hlavička
+    titulek "Calendar [^K]" v horním rámečku (stejně jako "Weather"), hlavička
     dnů (Mo..Su) je normální řádek uvnitř boxu nad mřížkou. Zbylý prostor nad
     6 týdny + hlavičkou se rozloží jako padding, ať mřížka nelepí nahoře."""
-    draw_box(stdscr, y0, x0, height, width, False, "[C]alendar")
+    draw_box(stdscr, y0, x0, height, width, False, "Calendar [^K]")
     weeks = calendar.monthcalendar(year, month)
     while len(weeks) < 6:
         weeks.append([0] * 7)
@@ -375,9 +379,11 @@ def render_calendar_strip(stdscr, year, month, today_day, notes, y0, x0, width, 
                 continue
             x = grid_x0 + col * col_w + col_w // 2 - 1
             y = row0 + row
-            label = f"{d}{'·' if d in notes_days else ''}"
+            num_str = str(d)
             style = curses.color_pair(3) | curses.A_REVERSE if d == today_day else curses.color_pair(1) | curses.A_BOLD
-            safe_addstr(stdscr, y, x, label[:col_w], style)
+            safe_addstr(stdscr, y, x, num_str[:col_w], style)
+            if d in notes_days and len(num_str) < col_w:
+                safe_addstr(stdscr, y, x + len(num_str), "●", curses.color_pair(4) | curses.A_BOLD)
 
 
 
@@ -1012,7 +1018,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     safe_addstr(stdscr, power_y - 1, x0 + 2, "─" * (width - 4), curses.color_pair(6))
     for j, (key, name, _cmd) in enumerate(POWER_OPTIONS):
         idx = power_start + j
-        label = f"[{key}] {name}"
+        label = f"[^{key}] {name}"
         style = curses.color_pair(3) | curses.A_REVERSE if idx == selected else curses.color_pair(5)
         safe_addstr(stdscr, power_y + j, x0 + 2, label[:width - 4].ljust(width - 4), style)
 
@@ -1051,7 +1057,8 @@ def main(stdscr):
 
     sel_side = 1 if len(sidebar_items) > 1 else 0
     grid_sel = 0
-    power_keys = {k: cmd for k, _n, cmd in POWER_OPTIONS}
+    power_keys = {ctrl(k): cmd for k, _n, cmd in POWER_OPTIONS}
+    CALENDAR_KEY = ctrl("K")  # ne Ctrl+C - to je SIGINT, terminál by to sežral dřív než curses
 
     desktop_apps_cache = scan_desktop_apps()
     timer_values = [0, 0, 0]
@@ -1089,25 +1096,27 @@ def main(stdscr):
         elif kind == "power":
             draw_power_preview(stdscr, name, cy0, cx0, cwidth, cheight)
 
-        hints = "TAB navigate   ENTER select   ESC close   l/s/o/r/p power   C calendar"
+        hints = "TAB navigate   ENTER select   ESC close   ^L/O/R/P power   ^K calendar"
         safe_addstr(stdscr, h - 1, w // 2 - len(hints) // 2, hints, curses.color_pair(2))
 
         stdscr.refresh()
         key = stdscr.getch()
 
-        # globální zkratky - fungují odkudkoliv v hlavní smyčce
-        if key != -1 and 0 <= key < 256:
-            ch = chr(key).lower()
-            if ch in power_keys:
-                subprocess.run(power_keys[ch])
-                return
-            if ch == "c":
-                draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
-                             desktop_apps_cache, timer_values, timer_field, focused=False)
-                draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
-                stdscr.refresh()
-                run_calendar(stdscr, cy0, cx0, cwidth, cheight)
-                continue
+        # globální zkratky - fungují odkudkoliv v hlavní smyčce.
+        # PowerMenu + Calendar jedou přes Ctrl (control-kódy 1-26 nejsou
+        # tisknutelné znaky, takže nikdy nekolidují s psaním do AppLauncheru,
+        # ani Shift). Calendar je na Ctrl+K, ne Ctrl+C - Ctrl+C je SIGINT a
+        # terminál by ho sežral dřív, než by se vůbec dostal do getch().
+        if key in power_keys:
+            subprocess.run(power_keys[key])
+            return
+        if key == CALENDAR_KEY:
+            draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
+                         desktop_apps_cache, timer_values, timer_field, focused=False)
+            draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
+            stdscr.refresh()
+            run_calendar(stdscr, cy0, cx0, cwidth, cheight)
+            continue
 
         name, kind, _extra = sidebar_items[sel_side]
 
