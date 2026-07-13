@@ -2,17 +2,24 @@
 """
 cockpit_dashboard.py — fullscreen dashboard (Win+grave).
 
-Levý sloupec (1/5): AppLauncher (úplně nahoře) -> běžící appky (app_id) ->
+Levý sloupec (1/5): AppLauncher (úplně nahoře) -> workspace switcher ->
 pinnuté Timer/WiFi/Bluetooth boxíky -> pinnuté PowerMenu dole.
-Fokus při startu naskočí na první appku (AppLauncher je jen o Shift+Tab výš).
+Fokus při startu naskočí na první workspace (AppLauncher je jen o Shift+Tab výš).
 
-Pravá plocha (4/5): kontextový obsah podle vybrané položky - grid oken,
-launcher, power preview - a dole napevno pruh Calendar (pasivní náhled
-měsíce) + Weather, max 8 řádků na výšku.
+Pravá plocha (4/5): kontextový obsah podle vybrané položky - náhled
+workspace, launcher, power preview - a dole napevno pruh Calendar (pasivní
+náhled měsíce) + Weather.
+
+Window switcher je záměrně na úrovni WORKSPACE, ne jednotlivého okna -
+cockpit_photographer.py fotí celý workspace najednou (grim to umí jen na to,
+co je aktuálně vidět, takže se to hodí lépe než foto po okně), a náhled je
+tak jeden konzistentní obrázek s předvídatelným poměrem stran místo gridu
+různě velkých oken. Cena: nejde skočit na konkrétní okno uvnitř workspace
+s víc oknama, jen na celý workspace (Enter = swaymsg workspace number N).
 
 Calendar NENÍ v sidebaru / Tab cyklení - je jen ten pasivní náhled dole a
-klávesa 'C' (na úrovni l/s/o/r/p), co odkudkoliv otevře interaktivní overlay
-(run_calendar) přes hlavní obsahovou plochu.
+klávesa Ctrl+K, co odkudkoliv otevře interaktivní overlay (run_calendar)
+přes hlavní obsahovou plochu.
 
 Timer je pinnutý boxík (jako WiFi/BT) - žádný samostatný fokus mode, h:m:s
 se nastavuje šipkama přímo když je boxík vybraný přes Tab, Enter spustí
@@ -24,7 +31,7 @@ dashboard běží v kitty s --listen-on, a při volbě WiFi/BT se vedle spustí
 OPRAVDOVÝ druhý kitty panel (kitty @ launch --location=vsplit) se skutečným
 impala/bluetuith procesem. Žádná emulace terminálu, je to nativní kitty split.
 
-PowerMenu jde spustit odkudkoliv v dashboardu klávesou (l/s/o/r/p), navíc
+PowerMenu jde spustit odkudkoliv v dashboardu klávesou Ctrl+L/O/R/P, navíc
 je i součástí Tab cyklení jako pinnuté položky dole v levém sloupci.
 """
 import curses
@@ -36,17 +43,13 @@ import datetime
 import threading
 import time
 import re
+import base64
 
 from cockpit_common import query_daemon
 
 HOME = os.path.expanduser("~")
 SCRIPTS = os.path.join(HOME, "scripts_sway")
 NOTES_FILE = os.path.expanduser("~/.local/share/calendar_notes.json")
-
-EXCLUDE_APP_IDS = {
-    "WindowSwitcher", "Connectivity", "Weather", "TimerPicker", "StickyTimer",
-    "Calendar", "PowerMenu", "AppLauncher", "FloatingCenter", "CockpitDashboard",
-}
 
 DESKTOP_DIRS = [
     "/run/current-system/sw/share/applications",
@@ -124,47 +127,128 @@ def weather_icon(desc):
 
 # ---------- sway tree / running apps ----------
 
-def get_running_apps():
+def get_workspaces():
+    """swaymsg -t get_workspaces vrací num/name/rect/focused/visible/output
+    rovnou - žádné procházení stromu potřeba (na rozdíl od starého
+    get_running_apps, co lezlo po celém stromu a groupovalo podle app_id)."""
     try:
-        r = subprocess.run(["swaymsg", "-t", "get_tree"],
+        r = subprocess.run(["swaymsg", "-t", "get_workspaces"],
                             capture_output=True, text=True, timeout=2)
-        tree = json.loads(r.stdout)
+        return json.loads(r.stdout)
     except Exception:
-        return {}
-
-    groups = {}
-
-    def walk(node):
-        app_id = node.get("app_id")
-        wp = node.get("window_properties") or {}
-        name = app_id or wp.get("class")
-        if name and name not in EXCLUDE_APP_IDS and node.get("type") in ("con", "floating_con"):
-            groups.setdefault(name, []).append({
-                "con_id": node.get("id"),
-                "title": node.get("name") or name,
-                "rect": node.get("rect", {}),
-            })
-        for child in node.get("nodes", []) + node.get("floating_nodes", []):
-            walk(child)
-
-    walk(tree)
-    return groups
-
-
-def grid_layout(n):
-    if n <= 0:
         return []
-    if n <= 3:
-        return [n]
-    rows = -(-n // 3)
-    base = n // rows
-    extra = n % rows
-    return [base + 1 if i < extra else base for i in range(rows)]
 
 
-def focus_window(con_id):
-    subprocess.run(["swaymsg", f"[con_id={con_id}] focus"],
+def switch_workspace(num):
+    subprocess.run(["swaymsg", "workspace", "number", str(num)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# ---------- náhledy oken (kitty graphics protocol) ----------
+#
+# cockpit_photographer.py fotí okna na pozadí a ukládá PNG do THUMB_DIR
+# podle con_id. Curses samo o sobě neumí vykreslit bitmapu - je to jen
+# znaková mřížka. Kitty graphics protocol je escape sekvence (\x1b_G...\x1b\\),
+# co terminálu řekne "polož sem obrázek", mimo curses úplně.
+#
+# Sixel a half-block truecolor fallback (pro terminály bez kitty protokolu,
+# např. foot přes sixel) jsou připravené jako stuby - zatím neimplementované,
+# ať se neladí tři netestované věci najednou.
+#
+# Důležité detaily, co dělají rozdíl mezi "funguje" a "rozbije to klávesnici":
+#  - `q=2` na každém příkazu = potlačí odpověď z kitty. Bez toho by kitty
+#    posílala vlastní APC odpovědi do STEJNÉHO vstupního proudu, ze kterého
+#    curses čte klávesy přes getch() - reálné riziko rozbití vstupu.
+#  - Placement se dělá cursor-position + escape, MIMO curses. Proto se volá
+#    až PO stdscr.refresh() v hlavní smyčce, ne uvnitř draw_workspace_preview() - curses
+#    interně trackuje pozici kurzoru pro optimalizaci, a raw zápis doprostřed
+#    curses cyklu by ho mohl rozhodit.
+#  - Žádné cachování podle image id (`i=`) - první verze si nechávala obrázek
+#    nahraný v kitty a jen ho přes id znovu "pokládala", což zmizelo po
+#    prvním framu (nejspíš `d=A` smaže i podkladová data, ne jen placement -
+#    kitty dokumentace k tomu není 100% jednoznačná a nechci na tom stavět).
+#    Místo toho `a=T` (transmit+display v jednom) pošle celý PNG znovu
+#    každý frame. PNG jsou už zmenšené photographerem na max 480px, takže
+#    re-transmit 3x/s je levný a tahle nejednoznačnost protokolu nás nezajímá.
+#  - `t=f` = kitty si obrázek přečte ze souboru SAMO (payload je jen
+#    base64 cesta k souboru, ne celý PNG) - nemusíme nic dekódovat/chunkovat
+#    v Pythonu a nepotřebujeme žádnou image knihovnu.
+
+KITTY_AVAILABLE = "KITTY_WINDOW_ID" in os.environ
+THUMB_DIR = os.path.expanduser("~/.cache/cockpit/thumbs")
+
+
+def _kitty_write(data: bytes):
+    try:
+        os.write(1, data)
+    except OSError:
+        pass
+
+
+def _kitty_send(control, payload=b""):
+    chunk = f"\x1b_G{control},q=2".encode()
+    if payload:
+        chunk += b";" + payload
+    chunk += b"\x1b\\"
+    _kitty_write(chunk)
+
+
+def _kitty_clear_placements():
+    _kitty_send("a=d,d=A")
+
+
+# Terminálová buňka NENÍ čtvercová - typický monospace font je zhruba
+# 2x vyšší než širší. c=/r= v kitty protokolu natáhne obrázek přesně na
+# daný počet sloupců/řádků BEZ ohledu na poměr stran zdrojového obrázku,
+# takže vysoké/úzké okno (portrait) se bez korekce viditelně zdeformuje.
+CELL_ASPECT = 2.0  # výška buňky / šířka buňky, v "pixelových" jednotkách
+
+
+def _fit_aspect(avail_w, avail_h, src_w, src_h):
+    """Największí (c, r) v buněčných jednotkách, co se vejde do avail_w x
+    avail_h a zachová poměr stran src_w:src_h. Vrací i (offset_x, offset_y)
+    pro vycentrování v původně vyhrazeném prostoru."""
+    if not src_w or not src_h:
+        return avail_w, avail_h, 0, 0
+    box_w_px = avail_w
+    box_h_px = avail_h * CELL_ASPECT
+    src_aspect = src_w / src_h
+    if src_aspect > box_w_px / box_h_px:
+        target_w_px = box_w_px
+        target_h_px = box_w_px / src_aspect
+    else:
+        target_h_px = box_h_px
+        target_w_px = box_h_px * src_aspect
+    c = max(1, round(target_w_px))
+    r = max(1, round(target_h_px / CELL_ASPECT))
+    offset_x = max((avail_w - c) // 2, 0)
+    offset_y = max((avail_h - r) // 2, 0)
+    return c, r, offset_x, offset_y
+
+
+def render_kitty_thumbnails(pending):
+    """pending = [(key, y, x, h, w, rect_w, rect_h), ...] - key je jméno
+    souboru bez přípony v THUMB_DIR (např. "ws_3" pro workspace 3). Volá se
+    AŽ PO stdscr.refresh().
+
+    Záměrně BEZ cachování podle image id: `a=T` (transmit+display v jednom)
+    pošle a rovnou zobrazí obrázek nanovo pokaždé, žádné spoléhání na to,
+    jestli d=A maže i uloženou obrazovou data nebo jen placement - ať je to
+    tak nebo tak, tenhle přístup na tom nezávisí. PNG jsou navíc už zmenšené
+    photographerem na max 960px, takže re-transmit 3x/s je levný."""
+    if not KITTY_AVAILABLE:
+        return
+    _kitty_clear_placements()
+    for key, y, x, h, w, rect_w, rect_h in pending:
+        if h < 2 or w < 2:
+            continue
+        path = os.path.join(THUMB_DIR, f"{key}.png")
+        if not os.path.exists(path):
+            continue
+        c, r, off_x, off_y = _fit_aspect(w, h, rect_w, rect_h)
+        b64path = base64.b64encode(path.encode()).decode()
+        _kitty_write(f"\x1b[{y + off_y + 1};{x + off_x + 1}H".encode())
+        _kitty_send(f"a=T,f=100,t=f,c={c},r={r}", b64path.encode())
 
 
 # ---------- calendar (z raficalendar.py) ----------
@@ -280,27 +364,30 @@ def safe_addstr(stdscr, y, x, text, attr=0):
         pass
 
 
-# ---------- pravý panel: grid oken ----------
+# ---------- pravý panel: náhled workspace ----------
 
-def draw_grid(stdscr, windows, selected, y0, x0, width, height):
-    rows = grid_layout(len(windows))
-    if not rows:
-        safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - 5, "no windows", curses.color_pair(5))
-        return
-    cell_h = height // len(rows)
-    idx = 0
-    y = y0
-    for row_count in rows:
-        cell_w = width // row_count
-        x = x0
-        for _ in range(row_count):
-            win = windows[idx]
-            draw_box(stdscr, y, x, cell_h, cell_w, idx == selected, win["title"])
-            dims = f"{win['rect'].get('width', '?')}x{win['rect'].get('height', '?')}"
-            safe_addstr(stdscr, y + cell_h // 2, x + cell_w // 2 - len(dims) // 2, dims, curses.color_pair(6))
-            idx += 1
-            x += cell_w
-        y += cell_h
+def draw_workspace_preview(stdscr, ws, y0, x0, width, height):
+    """Jeden náhled na celý (aktuálně vybraný) workspace, ne grid. Vrací
+    pending thumbnail list (0 nebo 1 prvek) pro render_kitty_thumbnails() -
+    ten se musí zavolat AŽ PO stdscr.refresh()."""
+    if ws is None:
+        safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - 6, "no workspace", curses.color_pair(5))
+        return []
+
+    draw_box(stdscr, y0, x0, height, width, False, ws.get("name", "?"))
+    rect = ws.get("rect", {})
+    dims = f"{rect.get('width', '?')}x{rect.get('height', '?')}"
+
+    img_y, img_x = y0 + 1, x0 + 1
+    img_h, img_w = height - 3, width - 2
+    if KITTY_AVAILABLE and img_h >= 2 and img_w >= 2:
+        dims_y = y0 + height - 2
+        safe_addstr(stdscr, dims_y, x0 + width // 2 - len(dims) // 2, dims, curses.color_pair(6))
+        key = f"ws_{ws['num']}"
+        return [(key, img_y, img_x, img_h, img_w, rect.get("width") or 0, rect.get("height") or 0)]
+    else:
+        safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - len(dims) // 2, dims, curses.color_pair(6))
+        return []
 
 
 # ---------- pravý panel: weather ----------
@@ -905,7 +992,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     band1_y = y0 + 1
     band2_y = band1_y + band_h
 
-    app_items = [(i, it) for i, it in enumerate(items) if it[1] == "app"]
+    ws_items = [(i, it) for i, it in enumerate(items) if it[1] == "workspace"]
 
     # --- horní polovina: App Launcher - vždy vidět, search pole + náhled seznamu ---
     safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
@@ -915,20 +1002,20 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     for i, (name, _cmd) in enumerate(desktop_apps_preview[:band_h - 3]):
         safe_addstr(stdscr, band1_y + 2 + i, x0 + 2, name[:width - 4], curses.color_pair(6))
 
-    # --- dolní polovina: Window Switcher - vždy vidět, scroll podle výběru ---
-    safe_addstr(stdscr, band2_y, x0 + 2, "── Windows ──"[:width - 4], curses.color_pair(6))
+    # --- dolní polovina: Workspace Switcher - vždy vidět, scroll podle výběru ---
+    safe_addstr(stdscr, band2_y, x0 + 2, "── Workspaces ──"[:width - 4], curses.color_pair(6))
     visible_apps = height - 2 - power_block_h - conn_block_h - band_h - 1
-    sel_local = next((n for n, (i, _it) in enumerate(app_items) if i == selected), None)
+    sel_local = next((n for n, (i, _it) in enumerate(ws_items) if i == selected), None)
     offset = 0
-    if sel_local is not None and len(app_items) > visible_apps:
-        offset = max(0, min(sel_local - visible_apps // 2, len(app_items) - visible_apps))
-    for n, (i, (name, _kind, extra)) in enumerate(app_items[offset:offset + visible_apps]):
+    if sel_local is not None and len(ws_items) > visible_apps:
+        offset = max(0, min(sel_local - visible_apps // 2, len(ws_items) - visible_apps))
+    for n, (i, (name, _kind, extra)) in enumerate(ws_items[offset:offset + visible_apps]):
         row = band2_y + 1 + n
         label = f"{name}{extra}"
         style = curses.color_pair(3) | curses.A_REVERSE if i == selected else curses.color_pair(1)
         safe_addstr(stdscr, row, x0 + 2, label[:width - 4].ljust(width - 4), style)
-    if not app_items:
-        safe_addstr(stdscr, band2_y + 1, x0 + 2, "(no windows)", curses.color_pair(6))
+    if not ws_items:
+        safe_addstr(stdscr, band2_y + 1, x0 + 2, "(no workspaces)", curses.color_pair(6))
 
     # --- pinnuté Timer/WiFi/BT boxíky, hned nad PowerMenu ---
     power_y = y0 + height - 1 - len(POWER_OPTIONS)
@@ -1042,10 +1129,10 @@ def main(stdscr):
                           # i bez stisku klávesy (WiFi signál / BT baterie
                           # a stav se doťáhnou téměř okamžitě po Enteru)
 
-    apps = get_running_apps()
+    workspaces = get_workspaces()
 
     sidebar_items = [("App Launcher", "launcher", "")]
-    sidebar_items += [(name, "app", f" ({len(wins)})") for name, wins in sorted(apps.items())]
+    sidebar_items += [(ws["name"], "workspace", "") for ws in sorted(workspaces, key=lambda w: w["num"])]
     sidebar_items += [
         ("Timer", "timer", ""),
         ("WiFi", "wifi", ""),
@@ -1056,7 +1143,6 @@ def main(stdscr):
         sidebar_items.append((name, "power", ""))
 
     sel_side = 1 if len(sidebar_items) > 1 else 0
-    grid_sel = 0
     power_keys = {ctrl(k): cmd for k, _n, cmd in POWER_OPTIONS}
     CALENDAR_KEY = ctrl("K")  # ne Ctrl+C - to je SIGINT, terminál by to sežral dřív než curses
 
@@ -1086,9 +1172,10 @@ def main(stdscr):
         draw_weather_strip(stdscr, strip_y, weather_x, weather_w, WEATHER_STRIP_H)
 
         name, kind, _extra = sidebar_items[sel_side]
-        if kind == "app":
-            windows = apps.get(name, [])
-            draw_grid(stdscr, windows, grid_sel, cy0, cx0, cwidth, cheight)
+        pending_thumbs = []
+        if kind == "workspace":
+            ws = next((w for w in workspaces if w["name"] == name), None)
+            pending_thumbs = draw_workspace_preview(stdscr, ws, cy0, cx0, cwidth, cheight)
         elif kind == "launcher":
             render_launcher(stdscr, "", desktop_apps_cache, -1, cy0, cx0, cwidth, cheight, interactive=False)
         elif kind in ("wifi", "bt", "timer"):
@@ -1100,6 +1187,8 @@ def main(stdscr):
         safe_addstr(stdscr, h - 1, w // 2 - len(hints) // 2, hints, curses.color_pair(2))
 
         stdscr.refresh()
+        # AŽ TEĎ, mimo curses - viz komentář u render_kitty_thumbnails() výš
+        render_kitty_thumbnails(pending_thumbs)
         key = stdscr.getch()
 
         # globální zkratky - fungují odkudkoliv v hlavní smyčce.
@@ -1115,6 +1204,7 @@ def main(stdscr):
                          desktop_apps_cache, timer_values, timer_field, focused=False)
             draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
             stdscr.refresh()
+            _kitty_clear_placements()  # run_calendar má vlastní smyčku - hlavní tik, co jinak čistí staré thumbnaily, se dokud běží vůbec nezavolá
             run_calendar(stdscr, cy0, cx0, cwidth, cheight)
             continue
 
@@ -1124,10 +1214,8 @@ def main(stdscr):
             return
         elif key == ord('\t'):
             sel_side = (sel_side + 1) % len(sidebar_items)
-            grid_sel = 0
         elif key == curses.KEY_BTAB:
             sel_side = (sel_side - 1) % len(sidebar_items)
-            grid_sel = 0
         elif kind == "timer" and key == curses.KEY_LEFT:
             timer_field = (timer_field - 1) % 3
         elif kind == "timer" and key == curses.KEY_RIGHT:
@@ -1137,10 +1225,10 @@ def main(stdscr):
         elif kind == "timer" and key == curses.KEY_DOWN:
             timer_values[timer_field] = (timer_values[timer_field] - 1) % (TIMER_LIMITS[timer_field] + 1)
         elif key in (10, 13):
-            if kind == "app":
-                windows = apps.get(name, [])
-                if windows and 0 <= grid_sel < len(windows):
-                    focus_window(windows[grid_sel]["con_id"])
+            if kind == "workspace":
+                ws = next((w for w in workspaces if w["name"] == name), None)
+                if ws:
+                    switch_workspace(ws["num"])
                     return
             elif kind == "launcher":
                 # fokus se přesouvá do obsahu - sidebar zešedne, obsah dostane zvýrazněný rámeček
@@ -1148,6 +1236,7 @@ def main(stdscr):
                              desktop_apps_cache, timer_values, timer_field, focused=False)
                 draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
                 stdscr.refresh()
+                _kitty_clear_placements()  # stejný důvod jako u run_calendar výš
                 run_launcher(stdscr, cy0, cx0, cwidth, cheight)
             elif kind == "timer":
                 if start_timer(timer_values):

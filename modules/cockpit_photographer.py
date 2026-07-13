@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-cockpit_photographer.py — background daemon, co fotí náhledy oken.
+cockpit_photographer.py — background daemon, co fotí náhledy CELÝCH workspaců
+(ne jednotlivých oken - dashboard teď přepíná po workspace, ne po appce).
 
-Wayland/Sway adaptace tvého i3_photographer.py. Místo xwd/maim (X11)
-používá grim (wlr-screencopy) a capturuje podle geometrie okna ze sway
-stromu. Nativní Wayland okna nemají X11 window id, takže cache klíčujeme
-podle sway con_id — funguje jednotně pro Wayland i XWayland okna.
+Klíčová věc, díky které tohle vůbec jde snadno: grim (wlr-screencopy) umí
+vyfotit jen to, co se aktuálně reálně vykresluje na obrazovku. Neviditelný
+workspace se vyfotit nedá - proto se fotí "opportunisticky" při
+workspace::focus (přesně ten moment, kdy je celý workspace vidět vcelku),
+a cache pak dashboardu stačí i pro workspace, co zrovna vidět není.
 
-Poslouchá i3ipc eventy (Sway je i3-ipc kompatibilní, i3ipc-python
-funguje beze změny):
-  - window::focus    -> vyfoť okno, co právě dostalo fokus
-  - window::new      -> vyfoť nové okno (delší delay, ať se stihne vykreslit)
-  - workspace::focus -> vyfoť všechna okna na nově viditelném workspace
-  - window::close    -> smaž cache náhled zavřeného okna
+Poslouchá i3ipc eventy (Sway je i3-ipc kompatibilní):
+  - workspace::focus -> vyfoť nově viditelný workspace celý, jedním grim
+  - window::new/close/move -> přefoť AKTUÁLNĚ FOCUSNUTÝ workspace (jen ten
+    může být viditelný, takže jen ten stojí za refresh)
 
-Cache: ~/.cache/cockpit/thumbs/<con_id>.png (atomický zápis přes os.replace)
+Cache: ~/.cache/cockpit/thumbs/ws_<num>.png (atomický zápis přes os.replace)
 """
 import i3ipc
 import subprocess
@@ -25,12 +25,37 @@ import time
 CACHE_DIR = os.path.expanduser("~/.cache/cockpit/thumbs")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# app_id/class, pod kterým běží dashboard a ostatní cockpit widgety - žádné
+# z nich se nesmí nikdy vyfotit jako "obsah workspace", jinak vznikne
+# rekurzivní screenshot (dashboard fotící sám sebe) a cache pro ten
+# workspace zůstane "otrávená" dokud ji nepřepíše něco jiného.
+# POZOR: over si přesný název přes `swaymsg -t get_tree | grep app_id`
+# s dashboardem otevřeným - jestli launcher/kitty config používá jiný
+# --class než "CockpitDashboard", uprav tenhle set.
+COCKPIT_APP_IDS = {
+    "CockpitDashboard", "WindowSwitcher", "Connectivity", "Weather",
+    "TimerPicker", "StickyTimer", "Calendar", "PowerMenu", "AppLauncher",
+    "FloatingCenter",
+}
 
-def take_screenshot(con_id, x, y, w, h):
-    if not con_id or w <= 0 or h <= 0:
+
+def workspace_has_cockpit_window(i3, ws_num):
+    """Fresh dotaz na strom (ne stará event data) - je na workspace ws_num
+    PRÁVĚ TEĎ nějaké cockpit okno? Pokud ano, nefoť."""
+    try:
+        ws_node = next((w for w in i3.get_tree().workspaces() if w.num == ws_num), None)
+        if not ws_node:
+            return False
+        return any((leaf.app_id or "") in COCKPIT_APP_IDS for leaf in ws_node.leaves())
+    except Exception:
+        return False
+
+
+def take_screenshot(ws_num, x, y, w, h):
+    if ws_num is None or w <= 0 or h <= 0:
         return
-    path = os.path.join(CACHE_DIR, f"{con_id}.png")
-    tmp_path = os.path.join(CACHE_DIR, f"{con_id}_tmp.png")
+    path = os.path.join(CACHE_DIR, f"ws_{ws_num}.png")
+    tmp_path = os.path.join(CACHE_DIR, f"ws_{ws_num}_tmp.png")
     geometry = f"{x},{y} {w}x{h}"
 
     try:
@@ -39,9 +64,10 @@ def take_screenshot(con_id, x, y, w, h):
             timeout=5, capture_output=True
         )
         if r.returncode == 0 and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-            # zmenšit, ať cache nenabobtná - dashboard stejně kreslí malé thumbnaily
+            # 960px - dost detailu i když dashboard ukáže náhled skoro na
+            # celou obrazovku, bez zbytečně velké cache.
             subprocess.run(
-                ["convert", tmp_path, "-resize", "480x>", tmp_path],
+                ["convert", tmp_path, "-resize", "960x>", tmp_path],
                 timeout=10, capture_output=True
             )
             os.replace(tmp_path, path)
@@ -55,63 +81,47 @@ def take_screenshot(con_id, x, y, w, h):
                 pass
 
 
-def shoot_window(i3, con_id, delay=0.3):
+def shoot_workspace(i3, ws, delay=0.15):
+    """ws je i3ipc WorkspaceReply/Con - potřebuje .num a .rect."""
+    if ws is None:
+        return
+    num, rect = ws.num, ws.rect
+
     def do():
         time.sleep(delay)
         try:
-            node = i3.get_tree().find_by_id(con_id)
-            if node and node.rect:
-                take_screenshot(con_id, node.rect.x, node.rect.y,
-                                 node.rect.width, node.rect.height)
+            if workspace_has_cockpit_window(i3, num):
+                return  # dashboard/widget je zrovna na tomhle workspace - nefoť sám sebe
+            take_screenshot(num, rect.x, rect.y, rect.width, rect.height)
         except Exception as e:
-            print(f"[cockpit_photographer] chyba u con_id {con_id}: {e}")
+            print(f"[cockpit_photographer] chyba u workspace {num}: {e}")
 
     threading.Thread(target=do, daemon=True).start()
 
 
-def is_real_window(node):
-    """True pro skutečné okno (Wayland i XWayland), ne pro workspace/output/scratchpad."""
-    return node.type in ("con", "floating_con") and (node.app_id or node.window)
-
-
-def cleanup_thumb(con_id):
-    path = os.path.join(CACHE_DIR, f"{con_id}.png")
-    if os.path.exists(path):
-        try:
-            os.remove(path)
-        except Exception:
-            pass
+def get_focused_workspace(i3):
+    focused = i3.get_tree().find_focused()
+    return focused.workspace() if focused else None
 
 
 def start_photographer():
     i3 = i3ipc.Connection()
 
-    def on_window_focus(i3, e):
-        if is_real_window(e.container):
-            shoot_window(i3, e.container.id, delay=0.15)
-
     def on_workspace_focus(i3, e):
-        for leaf in e.current.leaves():
-            if is_real_window(leaf):
-                shoot_window(i3, leaf.id, delay=0.1)
+        shoot_workspace(i3, e.current, delay=0.1)
 
-    def on_window_new(i3, e):
-        if is_real_window(e.container):
-            shoot_window(i3, e.container.id, delay=1.2)
+    def on_window_change(i3, e):
+        # jen aktuálně viditelný workspace stojí za refresh - neviditelný
+        # se stejně nedá vyfotit, dokud se na něj nepřepne (viz workspace::focus)
+        shoot_workspace(i3, get_focused_workspace(i3), delay=0.3)
 
-    def on_window_close(i3, e):
-        if is_real_window(e.container):
-            cleanup_thumb(e.container.id)
-
-    i3.on('window::focus', on_window_focus)
     i3.on('workspace::focus', on_workspace_focus)
-    i3.on('window::new', on_window_new)
-    i3.on('window::close', on_window_close)
+    i3.on('window::new', on_window_change)
+    i3.on('window::close', on_window_change)
+    i3.on('window::move', on_window_change)
 
-    # prvotní scan při startu
-    for leaf in i3.get_tree().leaves():
-        if is_real_window(leaf):
-            shoot_window(i3, leaf.id, delay=0.1)
+    # prvotní scan při startu - vyfoť aspoň ten, co je zrovna vidět
+    shoot_workspace(i3, get_focused_workspace(i3), delay=0.1)
 
     i3.main()
 
