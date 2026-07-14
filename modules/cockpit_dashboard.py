@@ -197,6 +197,25 @@ def _kitty_clear_placements():
     _kitty_send("a=d,d=A")
 
 
+def close_self():
+    """Proaktivně zabije vlastní kitty okno přes swaymsg - STEJNÝ mechanismus,
+    co už cockpit_dashboard_toggle.sh používá pro ruční zavření (Win+grave
+    podruhé), takže víme, že funguje spolehlivě a rychle.
+
+    Důvod, proč nestačí prostě `return` a nechat proces doběhnout: dashboard
+    má `fullscreen enable` for_window pravidlo. Když se z launcheru spustí
+    appka, sway ji vytvoří na tom samém workspace, ale dokud dashboardovo
+    okno fyzicky nezmizí, sway (`popup_during_fullscreen smart`, výchozí
+    hodnota) může dashboard "chytře" odfullscreenovat a ukázat ho tiled
+    vedle ještě nenaběhlé appky - tenhle přechod je vázaný na to, kdy sway
+    fakticky zaregistruje zavření okna, ne na to, kdy Python doběhne k
+    `return`. Proaktivní kill hned při rozhodnutí (místo čekání na reaktivní
+    řetězec proces-exit -> kitty-zavře-okno -> sway-si-všimne) dashboard
+    smázne z obrazovky okamžitě, bez ohledu na to, jak dlouho appka startuje."""
+    subprocess.run(["swaymsg", '[app_id="CockpitDashboard"] kill'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 # Terminálová buňka NENÍ čtvercová - typický monospace font je zhruba
 # 2x vyšší než širší. c=/r= v kitty protokolu natáhne obrázek přesně na
 # daný počet sloupců/řádků BEZ ohledu na poměr stran zdrojového obrázku,
@@ -925,97 +944,76 @@ def connect_best_known_wifi(ssid=None):
 
 # ---------- pravý panel: app launcher (render + vlastní smyčka) ----------
 
-def render_launcher(stdscr, query, filtered, sel, y0, x0, width, height, interactive=True):
-    for i in range(height):
-        safe_addstr(stdscr, y0 + i, x0, " " * width)
-
-    prompt = f"> {query}"
-    safe_addstr(stdscr, y0, x0, prompt, curses.color_pair(3) | curses.A_BOLD)
-
-    list_y = y0 + 2
-    for i, (name, _cmd) in enumerate(filtered[:height - 3]):
-        style = curses.color_pair(3) | curses.A_REVERSE if (interactive and i == sel) else curses.color_pair(1)
-        safe_addstr(stdscr, list_y + i, x0 + 2, name[:width - 4], style)
-
-    hints = "type to search   up/down: pick   Enter: launch   Esc: back" if interactive \
-        else "Enter to search"
-    safe_addstr(stdscr, y0 + height - 1, x0 + width // 2 - len(hints) // 2, hints, curses.color_pair(2))
+def filter_apps(apps, query):
+    if not query:
+        return apps
+    q = query.lower()
+    return [a for a in apps if q in a[0].lower()]
 
 
-def run_launcher(stdscr, y0, x0, width, height):
-    apps = scan_desktop_apps()
-    query = ""
-    filtered = apps
-    sel = 0
-    curses.curs_set(1)
-
-    while True:
-        render_launcher(stdscr, query, filtered, sel, y0, x0, width, height)
-        stdscr.refresh()
-
-        key = stdscr.getch()
-        if key == 27:
-            curses.curs_set(0)
-            return
-        elif key == curses.KEY_UP:
-            sel = max(0, sel - 1)
-        elif key == curses.KEY_DOWN:
-            sel = min(max(0, len(filtered) - 1), sel + 1)
-        elif key in (curses.KEY_BACKSPACE, 127):
-            query = query[:-1]
-            filtered = [a for a in apps if query.lower() in a[0].lower()]
-            sel = 0
-        elif key in (10, 13):
-            if filtered:
-                cmd = filtered[sel][1]
-                subprocess.Popen(["sh", "-c", cmd], start_new_session=True,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            curses.curs_set(0)
-            return
-        elif 32 <= key <= 126:
-            query += chr(key)
-            filtered = [a for a in apps if query.lower() in a[0].lower()]
-            sel = 0
+def draw_matched(stdscr, y, x, text, query, max_w, base_style, match_style):
+    """Vykreslí text, se zvýrazněnou první shodou query (case-insensitive) -
+    hned je vidět PROČ se výsledek zrovna zobrazil, místo holého výpisu."""
+    text = text[:max_w]
+    idx = text.lower().find(query.lower()) if query else -1
+    if idx == -1:
+        safe_addstr(stdscr, y, x, text, base_style)
+        return
+    safe_addstr(stdscr, y, x, text[:idx], base_style)
+    safe_addstr(stdscr, y, x + idx, text[idx:idx + len(query)], match_style)
+    safe_addstr(stdscr, y, x + idx + len(query), text[idx + len(query):], base_style)
 
 
 # ---------- sidebar ----------
 
 def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
-                  desktop_apps_preview, timer_values, timer_field, focused=True):
+                  timer_values, timer_field,
+                  launcher_active, launcher_query, launcher_results, launcher_sel,
+                  focused=True):
     draw_box(stdscr, y0, x0, height, width, focused)
 
     power_block_h = len(POWER_OPTIONS) + 2
     conn_block_h = 3 * CONN_BOX_H + 1  # Timer + WiFi + BT boxy + 1 řádek odděleného odstupu
     content_h = height - 2 - power_block_h - conn_block_h
-    band_h = max(content_h // 2, 5)
-
-    band1_y = y0 + 1
-    band2_y = band1_y + band_h
 
     ws_items = [(i, it) for i, it in enumerate(items) if it[1] == "workspace"]
 
-    # --- horní polovina: App Launcher - vždy vidět, search pole + náhled seznamu ---
-    safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
-    launcher_focused = (selected == 0)
-    prompt_style = curses.color_pair(3) | curses.A_REVERSE if launcher_focused else curses.color_pair(1)
-    safe_addstr(stdscr, band1_y + 1, x0 + 2, "> search apps"[:width - 4].ljust(width - 4), prompt_style)
-    for i, (name, _cmd) in enumerate(desktop_apps_preview[:band_h - 3]):
-        safe_addstr(stdscr, band1_y + 2 + i, x0 + 2, name[:width - 4], curses.color_pair(6))
+    if launcher_active:
+        # Launcher normálně vůbec není vidět - objeví se jen dokud se píše,
+        # a Workspaces mu ustoupí do zbylého prostoru dole.
+        band_h = max(content_h // 2, 5)
+        band1_y = y0 + 1
+        ws_y = band1_y + band_h
+        ws_visible = content_h - band_h - 1
 
-    # --- dolní polovina: Workspace Switcher - vždy vidět, scroll podle výběru ---
-    safe_addstr(stdscr, band2_y, x0 + 2, "── Workspaces ──"[:width - 4], curses.color_pair(6))
-    visible_apps = height - 2 - power_block_h - conn_block_h - band_h - 1
+        safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
+        safe_addstr(stdscr, band1_y + 1, x0 + 2, f"> {launcher_query}"[:width - 4].ljust(width - 4),
+                    curses.color_pair(3) | curses.A_BOLD)
+        if launcher_results:
+            for n, (name, _cmd) in enumerate(launcher_results[:band_h - 3]):
+                row = band1_y + 2 + n
+                style = curses.color_pair(3) | curses.A_REVERSE if n == launcher_sel else curses.color_pair(1)
+                match_style = style if n == launcher_sel else curses.color_pair(4) | curses.A_BOLD
+                draw_matched(stdscr, row, x0 + 2, name, launcher_query, width - 4, style, match_style)
+        else:
+            safe_addstr(stdscr, band1_y + 2, x0 + 2, "(no match)", curses.color_pair(5))
+    else:
+        ws_y = y0 + 1
+        ws_visible = content_h - 1
+
+    # --- Workspace switcher - vždy vidět, scroll podle výběru ---
+    safe_addstr(stdscr, ws_y, x0 + 2, "── Workspaces ──"[:width - 4], curses.color_pair(6))
     sel_local = next((n for n, (i, _it) in enumerate(ws_items) if i == selected), None)
     offset = 0
-    if sel_local is not None and len(ws_items) > visible_apps:
-        offset = max(0, min(sel_local - visible_apps // 2, len(ws_items) - visible_apps))
-    for n, (i, (name, _kind, extra)) in enumerate(ws_items[offset:offset + visible_apps]):
-        row = band2_y + 1 + n
+    if sel_local is not None and len(ws_items) > ws_visible:
+        offset = max(0, min(sel_local - ws_visible // 2, len(ws_items) - ws_visible))
+    for n, (i, (name, _kind, extra)) in enumerate(ws_items[offset:offset + ws_visible]):
+        row = ws_y + 1 + n
         label = f"{name}{extra}"
         style = curses.color_pair(3) | curses.A_REVERSE if i == selected else curses.color_pair(1)
         safe_addstr(stdscr, row, x0 + 2, label[:width - 4].ljust(width - 4), style)
     if not ws_items:
-        safe_addstr(stdscr, band2_y + 1, x0 + 2, "(no workspaces)", curses.color_pair(6))
+        safe_addstr(stdscr, ws_y + 1, x0 + 2, "(no workspaces)", curses.color_pair(6))
 
     # --- pinnuté Timer/WiFi/BT boxíky, hned nad PowerMenu ---
     power_y = y0 + height - 1 - len(POWER_OPTIONS)
@@ -1131,8 +1129,7 @@ def main(stdscr):
 
     workspaces = get_workspaces()
 
-    sidebar_items = [("App Launcher", "launcher", "")]
-    sidebar_items += [(ws["name"], "workspace", "") for ws in sorted(workspaces, key=lambda w: w["num"])]
+    sidebar_items = [(ws["name"], "workspace", "") for ws in sorted(workspaces, key=lambda w: w["num"])]
     sidebar_items += [
         ("Timer", "timer", ""),
         ("WiFi", "wifi", ""),
@@ -1142,14 +1139,21 @@ def main(stdscr):
     for key, name, _cmd in POWER_OPTIONS:
         sidebar_items.append((name, "power", ""))
 
-    sel_side = 1 if len(sidebar_items) > 1 else 0
+    sel_side = 0
     power_keys = {ctrl(k): cmd for k, _n, cmd in POWER_OPTIONS}
     CALENDAR_KEY = ctrl("K")  # ne Ctrl+C - to je SIGINT, terminál by to sežral dřív než curses
 
-    desktop_apps_cache = scan_desktop_apps()
+    all_apps = scan_desktop_apps()
     timer_values = [0, 0, 0]
     timer_field = 0
     WEATHER_STRIP_H = 10  # o 2 řádky vyšší než předtím - dává gridu dýchací prostor
+
+    # Launcher normálně vůbec není vidět - žádná položka v sidebar_items,
+    # žádné Tab cyklení. Objeví se, jakmile se začne psát cokoliv
+    # tisknutelného (viz "start typing" větev níž), kdekoliv v dashboardu.
+    launcher_active = False
+    launcher_query = ""
+    launcher_sel = 0
 
     while True:
         stdscr.erase()  # ne clear() - to force-touchne celé okno a zbytečně bliká
@@ -1163,8 +1167,13 @@ def main(stdscr):
         weather_x = cx0 + cal_w + 1
         weather_w = cwidth - cal_w - 1
 
+        launcher_results = filter_apps(all_apps, launcher_query) if launcher_active else []
+        if launcher_sel >= len(launcher_results):
+            launcher_sel = max(len(launcher_results) - 1, 0)
+
         draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
-                     desktop_apps_cache, timer_values, timer_field, focused=True)
+                     timer_values, timer_field,
+                     launcher_active, launcher_query, launcher_results, launcher_sel, focused=True)
         draw_box(stdscr, 0, side_w, h - 1, w - side_w, False)
         today = datetime.date.today()
         render_calendar_strip(stdscr, today.year, today.month, today.day, load_notes_cached(),
@@ -1176,15 +1185,10 @@ def main(stdscr):
         if kind == "workspace":
             ws = next((w for w in workspaces if w["name"] == name), None)
             pending_thumbs = draw_workspace_preview(stdscr, ws, cy0, cx0, cwidth, cheight)
-        elif kind == "launcher":
-            render_launcher(stdscr, "", desktop_apps_cache, -1, cy0, cx0, cwidth, cheight, interactive=False)
         elif kind in ("wifi", "bt", "timer"):
             pass  # stav a ovládání se teď dějí přímo v pinnutém boxíku v sidebaru
         elif kind == "power":
             draw_power_preview(stdscr, name, cy0, cx0, cwidth, cheight)
-
-        hints = "TAB navigate   ENTER select   ESC close   ^L/O/R/P power   ^K calendar"
-        safe_addstr(stdscr, h - 1, w // 2 - len(hints) // 2, hints, curses.color_pair(2))
 
         stdscr.refresh()
         # AŽ TEĎ, mimo curses - viz komentář u render_kitty_thumbnails() výš
@@ -1197,20 +1201,64 @@ def main(stdscr):
         # ani Shift). Calendar je na Ctrl+K, ne Ctrl+C - Ctrl+C je SIGINT a
         # terminál by ho sežral dřív, než by se vůbec dostal do getch().
         if key in power_keys:
-            subprocess.run(power_keys[key])
+            close_self()
+            _kitty_clear_placements()
+            subprocess.Popen(power_keys[key], start_new_session=True,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
         if key == CALENDAR_KEY:
             draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
-                         desktop_apps_cache, timer_values, timer_field, focused=False)
+                         timer_values, timer_field,
+                         launcher_active, launcher_query, launcher_results, launcher_sel, focused=False)
             draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
             stdscr.refresh()
             _kitty_clear_placements()  # run_calendar má vlastní smyčku - hlavní tik, co jinak čistí staré thumbnaily, se dokud běží vůbec nezavolá
             run_calendar(stdscr, cy0, cx0, cwidth, cheight)
             continue
 
+        # "start typing" - libovolné tisknutelné písmeno kdekoliv v dashboardu
+        # otevře launcher (dmenu/rofi styl). Rozsah 32-126 nikdy nekoliduje
+        # s Ctrl kódy (1-26) ani s Tab/Enter/Esc (9/10/13/27).
+        if not launcher_active and 32 <= key <= 126:
+            launcher_active = True
+            launcher_query = chr(key)
+            launcher_sel = 0
+            continue
+
+        if launcher_active:
+            if key == 27:
+                launcher_active = False
+                launcher_query = ""
+            elif key == ord('\t'):
+                launcher_active = False  # Tab = "pryč z hledání", ne skok jinam ve stejném stisku
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if launcher_query:
+                    launcher_query = launcher_query[:-1]
+                    launcher_sel = 0
+                else:
+                    launcher_active = False
+            elif key == curses.KEY_UP:
+                launcher_sel = max(launcher_sel - 1, 0)
+            elif key == curses.KEY_DOWN:
+                launcher_sel = min(launcher_sel + 1, max(len(launcher_results) - 1, 0))
+            elif key in (10, 13):
+                if launcher_results:
+                    cmd = launcher_results[launcher_sel][1]
+                    close_self()
+                    _kitty_clear_placements()
+                    subprocess.Popen(["sh", "-c", cmd], start_new_session=True,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+            elif 32 <= key <= 126:
+                launcher_query += chr(key)
+                launcher_sel = 0
+            continue
+
         name, kind, _extra = sidebar_items[sel_side]
 
         if key == 27:
+            close_self()
+            _kitty_clear_placements()
             return
         elif key == ord('\t'):
             sel_side = (sel_side + 1) % len(sidebar_items)
@@ -1228,18 +1276,14 @@ def main(stdscr):
             if kind == "workspace":
                 ws = next((w for w in workspaces if w["name"] == name), None)
                 if ws:
+                    close_self()
+                    _kitty_clear_placements()
                     switch_workspace(ws["num"])
                     return
-            elif kind == "launcher":
-                # fokus se přesouvá do obsahu - sidebar zešedne, obsah dostane zvýrazněný rámeček
-                draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
-                             desktop_apps_cache, timer_values, timer_field, focused=False)
-                draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
-                stdscr.refresh()
-                _kitty_clear_placements()  # stejný důvod jako u run_calendar výš
-                run_launcher(stdscr, cy0, cx0, cwidth, cheight)
             elif kind == "timer":
                 if start_timer(timer_values):
+                    close_self()
+                    _kitty_clear_placements()
                     return
             elif kind == "wifi":
                 connect_best_known_wifi(get_best_known_available_wifi())
@@ -1248,7 +1292,10 @@ def main(stdscr):
             elif kind == "power":
                 for _k, name_, cmd_ in POWER_OPTIONS:
                     if name_ == name:
-                        subprocess.run(cmd_)
+                        close_self()
+                        _kitty_clear_placements()
+                        subprocess.Popen(cmd_, start_new_session=True,
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         return
 
 
