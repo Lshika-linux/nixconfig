@@ -1146,7 +1146,7 @@ def main(stdscr):
     all_apps = scan_desktop_apps()
     timer_values = [0, 0, 0]
     timer_field = 0
-    WEATHER_STRIP_H = 10  # o 2 řádky vyšší než předtím - dává gridu dýchací prostor
+    WEATHER_STRIP_H = 12  # o další řádek víc
 
     # Launcher normálně vůbec není vidět - žádná položka v sidebar_items,
     # žádné Tab cyklení. Objeví se, jakmile se začne psát cokoliv
@@ -1161,7 +1161,7 @@ def main(stdscr):
         side_w = max(w // 5, 20)
         cx0, cy0 = side_w + 1, 1
         cwidth = (w - side_w) - 2
-        cheight = (h - 3) - WEATHER_STRIP_H
+        cheight = (h - 1) - WEATHER_STRIP_H
         strip_y = cy0 + cheight
         cal_w = (cwidth - 1) * 2 // 5  # poměr 2:3 kalendář:weather
         weather_x = cx0 + cal_w + 1
@@ -1171,10 +1171,15 @@ def main(stdscr):
         if launcher_sel >= len(launcher_results):
             launcher_sel = max(len(launcher_results) - 1, 0)
 
-        draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
+        # h (ne h-1) - žádný rezervovaný spodní řádek. draw_box je zabalený
+        # v try/except curses.error, takže i kdyby psaní do úplně posledního
+        # rohu obrazovky narazilo na starou ncurses libůstku (addch do
+        # pravého dolního rohu okna může shodit error), nic to nerozbije -
+        # nanejvýš by se ten jeden roh nedokreslil.
+        draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
                      timer_values, timer_field,
                      launcher_active, launcher_query, launcher_results, launcher_sel, focused=True)
-        draw_box(stdscr, 0, side_w, h - 1, w - side_w, False)
+        draw_box(stdscr, 0, side_w, h, w - side_w, False)
         today = datetime.date.today()
         render_calendar_strip(stdscr, today.year, today.month, today.day, load_notes_cached(),
                                strip_y, cx0, cal_w, WEATHER_STRIP_H)
@@ -1207,10 +1212,10 @@ def main(stdscr):
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
         if key == CALENDAR_KEY:
-            draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h - 1, power_start,
+            draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
                          timer_values, timer_field,
                          launcher_active, launcher_query, launcher_results, launcher_sel, focused=False)
-            draw_box(stdscr, 0, side_w, h - 1, w - side_w, True)
+            draw_box(stdscr, 0, side_w, h, w - side_w, True)
             stdscr.refresh()
             _kitty_clear_placements()  # run_calendar má vlastní smyčku - hlavní tik, co jinak čistí staré thumbnaily, se dokud běží vůbec nezavolá
             run_calendar(stdscr, cy0, cx0, cwidth, cheight)
