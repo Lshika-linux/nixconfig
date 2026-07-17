@@ -73,6 +73,8 @@
   
   services.libinput.enable = true;
 
+  services.tailscale.enable = true;
+
   # USER settings - Rafi
   users.users.rafi = {
      isNormalUser = true;

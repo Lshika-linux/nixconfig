@@ -6,7 +6,8 @@
       background_opacity = "0.75";
       font_size = "13.0";
       confirm_os_window_close = 0;
-      scrollback_lines = 0;
+      scrollback_lines = 2000;
+      term = "xterm-256color";
       foreground = "#cdd6f4";
       background = "#1a1e2e";
       cursor     = "#c8848b";
