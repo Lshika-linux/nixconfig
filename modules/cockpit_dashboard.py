@@ -51,6 +51,17 @@ HOME = os.path.expanduser("~")
 SCRIPTS = os.path.join(HOME, "scripts_sway")
 NOTES_FILE = os.path.expanduser("~/.local/share/calendar_notes.json")
 
+WS_COUNT = 10  # sway workspaces 1-10 - v sidebaru vidět VŽDY všechny, i prázdné
+
+# Vlastní cockpit okna - při zjišťování "co běží na workspace" je vynech,
+# jinak by workspace, na kterém je zrovna otevřený dashboard, tautologicky
+# hlásil "CockpitDashboard" místo skutečného obsahu, co je pod ním.
+COCKPIT_OWN_APP_IDS = {
+    "CockpitDashboard", "WindowSwitcher", "Connectivity", "Weather",
+    "TimerPicker", "StickyTimer", "Calendar", "PowerMenu", "AppLauncher",
+    "FloatingCenter",
+}
+
 DESKTOP_DIRS = [
     "/run/current-system/sw/share/applications",
     os.path.expanduser("~/.nix-profile/share/applications"),
@@ -142,6 +153,61 @@ def get_workspaces():
 def switch_workspace(num):
     subprocess.run(["swaymsg", "workspace", "number", str(num)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def get_workspace_apps():
+    """Projde CELÝ sway strom jednou (get_tree) a vrátí {ws_num: [app, ...]} -
+    jeden běh nahradí dotazování po jednotlivých workspacech. Používá app_id
+    (wayland-native okna), s fallbackem na window_properties.class pro
+    xwayland appky, co app_id nenastavují. Vlastní cockpit okna (dashboard
+    sám na sobě, když je fullscreen nad něčím jiným) jsou vyfiltrovaná."""
+    try:
+        r = subprocess.run(["swaymsg", "-t", "get_tree"],
+                            capture_output=True, text=True, timeout=2)
+        tree = json.loads(r.stdout)
+    except Exception:
+        return {}
+
+    result = {}
+
+    def walk(node, ws_num):
+        if node.get("type") == "workspace":
+            try:
+                ws_num = int(node.get("num"))
+            except (TypeError, ValueError):
+                ws_num = None
+        if ws_num is not None:
+            name = node.get("app_id") or (node.get("window_properties") or {}).get("class")
+            if name and name not in COCKPIT_OWN_APP_IDS:
+                result.setdefault(ws_num, []).append(name)
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            walk(child, ws_num)
+
+    walk(tree, None)
+    return result
+
+
+def get_outputs():
+    try:
+        r = subprocess.run(["swaymsg", "-t", "get_outputs"],
+                            capture_output=True, text=True, timeout=2)
+        return json.loads(r.stdout)
+    except Exception:
+        return []
+
+
+_ws_cache = {"workspaces": [], "apps": {}, "ts": 0.0}
+_WS_CACHE_TTL = 1.5  # sekund - stejný princip jako u wifi/bt cache, ať se
+                      # get_tree/get_workspaces netahá 3x/s při 300ms tiku hlavní smyčky
+
+
+def get_workspaces_cached():
+    now = time.time()
+    if now - _ws_cache["ts"] > _WS_CACHE_TTL:
+        _ws_cache["workspaces"] = get_workspaces()
+        _ws_cache["apps"] = get_workspace_apps()
+        _ws_cache["ts"] = now
+    return _ws_cache["workspaces"], _ws_cache["apps"]
 
 
 # ---------- náhledy oken (kitty graphics protocol) ----------
@@ -385,25 +451,28 @@ def safe_addstr(stdscr, y, x, text, attr=0):
 
 # ---------- pravý panel: náhled workspace ----------
 
-def draw_workspace_preview(stdscr, ws, y0, x0, width, height):
-    """Jeden náhled na celý (aktuálně vybraný) workspace, ne grid. Vrací
-    pending thumbnail list (0 nebo 1 prvek) pro render_kitty_thumbnails() -
-    ten se musí zavolat AŽ PO stdscr.refresh()."""
-    if ws is None:
-        safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - 6, "no workspace", curses.color_pair(5))
-        return []
+def draw_workspace_preview(stdscr, ws_num, ws, output_dims, y0, x0, width, height):
+    """Náhled na CELÝ output (fyzický monitor, i s barem) - ne jen workspace
+    rect (viz cockpit_photographer.py, co teď fotí přes `grim -o <output>`).
+    ws může být None (workspace ještě fyzicky neexistuje - Enter ho stejně
+    přes swaymsg vytvoří), pak se zkusí aspoň starý cache soubor, pokud
+    tam nějaký je. Vrací pending thumbnail list (0 nebo 1 prvek) pro
+    render_kitty_thumbnails() - ten se musí zavolat AŽ PO stdscr.refresh()."""
+    draw_box(stdscr, y0, x0, height, width, False, str(ws_num))
+    out_w, out_h = output_dims if output_dims else (0, 0)
+    dims = f"{out_w}x{out_h}" if out_w and out_h else "?"
 
-    draw_box(stdscr, y0, x0, height, width, False, ws.get("name", "?"))
-    rect = ws.get("rect", {})
-    dims = f"{rect.get('width', '?')}x{rect.get('height', '?')}"
+    if ws is None:
+        hint = "not currently open"
+        safe_addstr(stdscr, y0 + 1, x0 + width // 2 - len(hint) // 2, hint, curses.color_pair(6))
 
     img_y, img_x = y0 + 1, x0 + 1
     img_h, img_w = height - 3, width - 2
-    if KITTY_AVAILABLE and img_h >= 2 and img_w >= 2:
+    if KITTY_AVAILABLE and img_h >= 2 and img_w >= 2 and out_w and out_h:
         dims_y = y0 + height - 2
         safe_addstr(stdscr, dims_y, x0 + width // 2 - len(dims) // 2, dims, curses.color_pair(6))
-        key = f"ws_{ws['num']}"
-        return [(key, img_y, img_x, img_h, img_w, rect.get("width") or 0, rect.get("height") or 0)]
+        key = f"ws_{ws_num}"
+        return [(key, img_y, img_x, img_h, img_w, out_w, out_h)]
     else:
         safe_addstr(stdscr, y0 + height // 2, x0 + width // 2 - len(dims) // 2, dims, curses.color_pair(6))
         return []
@@ -964,10 +1033,37 @@ def draw_matched(stdscr, y, x, text, query, max_w, base_style, match_style):
     safe_addstr(stdscr, y, x + idx + len(query), text[idx + len(query):], base_style)
 
 
+# ---------- sidebar: workspace boxíky (1-10, vždy všechny) ----------
+
+def draw_workspace_boxes(stdscr, ws_apps, selected_num, y0, x0, width, avail_h, count=WS_COUNT):
+    """count malých boxíků (styl podobný Timer/WiFi/BT boxíkům), jeden na
+    workspace, VŽDY všech count kusů - i prázdné/neexistující, ať je vidět
+    celý přehled najednou bez scrollování. Uvnitř textově, co na tom
+    workspace běží (app_id/class oken). Výška boxíku se počítá z dostupného
+    prostoru; když je místa málo, boxík se zmenší na 2 řádky a název appek
+    se napíše rovnou do titulku (draw_box to umí), místo do content řádku."""
+    safe_addstr(stdscr, y0, x0 + 2, "── Workspaces ──"[:width - 4], curses.color_pair(6))
+    top = y0 + 1
+    box_h = max(avail_h // count, 2)
+    for i in range(count):
+        num = i + 1
+        by = top + i * box_h
+        focused = (num == selected_num)
+        apps = list(dict.fromkeys(ws_apps.get(num, [])))  # dedupe, zachová pořadí
+        text = ", ".join(apps) if apps else "empty"
+        if box_h >= 3:
+            draw_box(stdscr, by, x0, box_h, width, focused, str(num))
+            style = curses.color_pair(3) | curses.A_BOLD if focused else curses.color_pair(1)
+            safe_addstr(stdscr, by + 1, x0 + 2, text[:width - 4], style)
+        else:
+            title = f"{num}: {text}"
+            draw_box(stdscr, by, x0, box_h, width, focused, title)
+
+
 # ---------- sidebar ----------
 
 def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
-                  timer_values, timer_field,
+                  timer_values, timer_field, ws_apps,
                   launcher_active, launcher_query, launcher_results, launcher_sel,
                   focused=True):
     draw_box(stdscr, y0, x0, height, width, focused)
@@ -976,7 +1072,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     conn_block_h = 3 * CONN_BOX_H + 1  # Timer + WiFi + BT boxy + 1 řádek odděleného odstupu
     content_h = height - 2 - power_block_h - conn_block_h
 
-    ws_items = [(i, it) for i, it in enumerate(items) if it[1] == "workspace"]
+    selected_ws_num = items[selected][0] if items[selected][1] == "workspace" else None
 
     if launcher_active:
         # Launcher normálně vůbec není vidět - objeví se jen dokud se píše,
@@ -984,7 +1080,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
         band_h = max(content_h // 2, 5)
         band1_y = y0 + 1
         ws_y = band1_y + band_h
-        ws_visible = content_h - band_h - 1
+        ws_avail = content_h - band_h - 1
 
         safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
         safe_addstr(stdscr, band1_y + 1, x0 + 2, f"> {launcher_query}"[:width - 4].ljust(width - 4),
@@ -999,21 +1095,10 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
             safe_addstr(stdscr, band1_y + 2, x0 + 2, "(no match)", curses.color_pair(5))
     else:
         ws_y = y0 + 1
-        ws_visible = content_h - 1
+        ws_avail = content_h - 1
 
-    # --- Workspace switcher - vždy vidět, scroll podle výběru ---
-    safe_addstr(stdscr, ws_y, x0 + 2, "── Workspaces ──"[:width - 4], curses.color_pair(6))
-    sel_local = next((n for n, (i, _it) in enumerate(ws_items) if i == selected), None)
-    offset = 0
-    if sel_local is not None and len(ws_items) > ws_visible:
-        offset = max(0, min(sel_local - ws_visible // 2, len(ws_items) - ws_visible))
-    for n, (i, (name, _kind, extra)) in enumerate(ws_items[offset:offset + ws_visible]):
-        row = ws_y + 1 + n
-        label = f"{name}{extra}"
-        style = curses.color_pair(3) | curses.A_REVERSE if i == selected else curses.color_pair(1)
-        safe_addstr(stdscr, row, x0 + 2, label[:width - 4].ljust(width - 4), style)
-    if not ws_items:
-        safe_addstr(stdscr, ws_y + 1, x0 + 2, "(no workspaces)", curses.color_pair(6))
+    # --- Workspace boxíky 1-10, vždy VŠECHNY vidět, žádné scrollování ---
+    draw_workspace_boxes(stdscr, ws_apps, selected_ws_num, ws_y, x0, width, ws_avail)
 
     # --- pinnuté Timer/WiFi/BT boxíky, hned nad PowerMenu ---
     power_y = y0 + height - 1 - len(POWER_OPTIONS)
@@ -1127,9 +1212,13 @@ def main(stdscr):
                           # i bez stisku klávesy (WiFi signál / BT baterie
                           # a stav se doťáhnou téměř okamžitě po Enteru)
 
-    workspaces = get_workspaces()
+    workspaces, ws_apps = get_workspaces_cached()
+    outputs = get_outputs()
+    output_res = {o["name"]: (o["rect"]["width"], o["rect"]["height"])
+                   for o in outputs if o.get("active") and o.get("rect")}
+    fallback_output_dims = next(iter(output_res.values()), (0, 0))
 
-    sidebar_items = [(ws["name"], "workspace", "") for ws in sorted(workspaces, key=lambda w: w["num"])]
+    sidebar_items = [(num, "workspace", "") for num in range(1, WS_COUNT + 1)]
     sidebar_items += [
         ("Timer", "timer", ""),
         ("WiFi", "wifi", ""),
@@ -1157,6 +1246,7 @@ def main(stdscr):
 
     while True:
         stdscr.erase()  # ne clear() - to force-touchne celé okno a zbytečně bliká
+        workspaces, ws_apps = get_workspaces_cached()  # TTL cache - viz get_workspaces_cached()
         h, w = stdscr.getmaxyx()
         side_w = max(w // 5, 20)
         cx0, cy0 = side_w + 1, 1
@@ -1177,7 +1267,7 @@ def main(stdscr):
         # pravého dolního rohu okna může shodit error), nic to nerozbije -
         # nanejvýš by se ten jeden roh nedokreslil.
         draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
-                     timer_values, timer_field,
+                     timer_values, timer_field, ws_apps,
                      launcher_active, launcher_query, launcher_results, launcher_sel, focused=True)
         draw_box(stdscr, 0, side_w, h, w - side_w, False)
         today = datetime.date.today()
@@ -1185,15 +1275,18 @@ def main(stdscr):
                                strip_y, cx0, cal_w, WEATHER_STRIP_H)
         draw_weather_strip(stdscr, strip_y, weather_x, weather_w, WEATHER_STRIP_H)
 
-        name, kind, _extra = sidebar_items[sel_side]
+        item_id, kind, _extra = sidebar_items[sel_side]
         pending_thumbs = []
         if kind == "workspace":
-            ws = next((w for w in workspaces if w["name"] == name), None)
-            pending_thumbs = draw_workspace_preview(stdscr, ws, cy0, cx0, cwidth, cheight)
+            num = item_id
+            ws = next((wsp for wsp in workspaces if wsp["num"] == num), None)
+            out_name = ws.get("output") if ws else None
+            output_dims = output_res.get(out_name, fallback_output_dims)
+            pending_thumbs = draw_workspace_preview(stdscr, num, ws, output_dims, cy0, cx0, cwidth, cheight)
         elif kind in ("wifi", "bt", "timer"):
             pass  # stav a ovládání se teď dějí přímo v pinnutém boxíku v sidebaru
         elif kind == "power":
-            draw_power_preview(stdscr, name, cy0, cx0, cwidth, cheight)
+            draw_power_preview(stdscr, item_id, cy0, cx0, cwidth, cheight)
 
         stdscr.refresh()
         # AŽ TEĎ, mimo curses - viz komentář u render_kitty_thumbnails() výš
@@ -1213,7 +1306,7 @@ def main(stdscr):
             return
         if key == CALENDAR_KEY:
             draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
-                         timer_values, timer_field,
+                         timer_values, timer_field, ws_apps,
                          launcher_active, launcher_query, launcher_results, launcher_sel, focused=False)
             draw_box(stdscr, 0, side_w, h, w - side_w, True)
             stdscr.refresh()
@@ -1259,7 +1352,7 @@ def main(stdscr):
                 launcher_sel = 0
             continue
 
-        name, kind, _extra = sidebar_items[sel_side]
+        item_id, kind, _extra = sidebar_items[sel_side]
 
         if key == 27:
             close_self()
@@ -1279,12 +1372,12 @@ def main(stdscr):
             timer_values[timer_field] = (timer_values[timer_field] - 1) % (TIMER_LIMITS[timer_field] + 1)
         elif key in (10, 13):
             if kind == "workspace":
-                ws = next((w for w in workspaces if w["name"] == name), None)
-                if ws:
-                    close_self()
-                    _kitty_clear_placements()
-                    switch_workspace(ws["num"])
-                    return
+                # funguje i na workspace, co ještě fyzicky neexistuje -
+                # `swaymsg workspace number N` si ho sám vytvoří
+                close_self()
+                _kitty_clear_placements()
+                switch_workspace(item_id)
+                return
             elif kind == "timer":
                 if start_timer(timer_values):
                     close_self()
@@ -1296,7 +1389,7 @@ def main(stdscr):
                 connect_bluetooth_device(BT_DEVICE_MAC)
             elif kind == "power":
                 for _k, name_, cmd_ in POWER_OPTIONS:
-                    if name_ == name:
+                    if name_ == item_id:
                         close_self()
                         _kitty_clear_placements()
                         subprocess.Popen(cmd_, start_new_session=True,
