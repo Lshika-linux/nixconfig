@@ -512,6 +512,106 @@ def draw_weather_strip(stdscr, y0, x0, width, height):
         safe_addstr(stdscr, start + 2, x0 + width // 2 - len(line3) // 2, line3, curses.color_pair(1))
 
 
+# ---------- pravý panel: volume/brightness vertikální bary ----------
+#
+# Sedí napravo vedle velkého náhledu (workspace/power preview), NE přes
+# celou výšku pravé plochy - končí tam, kde končí náhled, nad Calendar/
+# Weather stripem (ten zůstává na plnou šířku jako dřív).
+
+_av_cache = {"volume": (None, 0.0), "brightness": (None, 0.0)}
+_AV_CACHE_TTL = 1  # sekund - stejný princip jako u wifi/bt cache, ať se
+                    # pactl/brightnessctl netahá 3x/s při 300ms tiku hlavní smyčky
+
+
+def _fetch_volume():
+    try:
+        r = subprocess.run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+                            capture_output=True, text=True, timeout=2)
+        m = re.search(r"(\d+)%", r.stdout)
+        if not m:
+            return None
+        pct = int(m.group(1))
+        rm = subprocess.run(["pactl", "get-sink-mute", "@DEFAULT_SINK@"],
+                             capture_output=True, text=True, timeout=2)
+        muted = "yes" in rm.stdout.lower()
+        return {"pct": pct, "muted": muted}
+    except Exception:
+        return None
+
+
+def _fetch_brightness():
+    """brightnessctl -m: '<device>,<class>,<current>,<percent>%,<max>' -
+    percent je vždycky 4. pole, bez ohledu na jméno/typ podsvícení."""
+    try:
+        r = subprocess.run(["brightnessctl", "-m"], capture_output=True, text=True, timeout=2)
+        parts = r.stdout.strip().split(",")
+        pct = int(parts[3].rstrip("%"))
+        return {"pct": pct}
+    except Exception:
+        return None
+
+
+def get_volume():
+    data, ts = _av_cache["volume"]
+    now = time.time()
+    if now - ts < _AV_CACHE_TTL:
+        return data
+    data = _fetch_volume()
+    _av_cache["volume"] = (data, now)
+    return data
+
+
+def get_brightness():
+    data, ts = _av_cache["brightness"]
+    now = time.time()
+    if now - ts < _AV_CACHE_TTL:
+        return data
+    data = _fetch_brightness()
+    _av_cache["brightness"] = (data, now)
+    return data
+
+
+VBARS_W = 11  # border+pad(2) + bar(3) + gap(1) + bar(3) + pad+border(2)
+
+
+def draw_vbars(stdscr, volume, brightness, y0, x0, width, height):
+    """Dva vertikální bary vedle sebe (hlasitost, jas), v rámečku (viz
+    main_pane_w v main() - jeho pravý okraj je schválně zarovnaný přesně
+    na vnější rámeček, ne o 1 sloupec vedle - to dřív dělalo tu "utrženou"
+    dvojitou čáru). Bary NEJDOU až úplně nahoru - ukotvené dole, těsně nad
+    nimi je jen krátký label (VOL/BRI), nahoře v boxu zůstává prázdný
+    prostor. Čistě bílé, žádné procentní číslo - to už nese výška baru."""
+    draw_box(stdscr, y0, x0, height, width, False)
+    content_rows = height - 2
+    label_row = y0 + height - 2
+    bar_bottom = label_row - 1
+    bar_rows = max(content_rows - 1, 4)  # -1 = řádek s labelem VOL/BRI, zbytek celý pro bar
+
+    bar1_x = x0 + 2
+    bar2_x = bar1_x + 4
+
+    def draw_bar(bx, pct):
+        pct = max(0, min(100, pct if pct is not None else 0))
+        filled = round(bar_rows * pct / 100)
+        for i in range(bar_rows):
+            row = bar_bottom - i
+            if i < filled:
+                safe_addstr(stdscr, row, bx, "███", curses.color_pair(1) | curses.A_BOLD)
+            else:
+                safe_addstr(stdscr, row, bx, "░░░", curses.color_pair(6))
+
+    vol_pct = volume["pct"] if volume else None
+    vol_muted = bool(volume and volume.get("muted"))
+    draw_bar(bar1_x, 0 if vol_muted else vol_pct)
+
+    bri_pct = brightness["pct"] if brightness else None
+    draw_bar(bar2_x, bri_pct)
+
+    safe_addstr(stdscr, label_row, bar1_x, "VOL", curses.color_pair(6))
+    safe_addstr(stdscr, label_row, bar2_x, "BRI", curses.color_pair(6))
+
+
+
 # ---------- pravý panel: kompaktní kalendář vedle weather (pasivní náhled) ----------
 
 def render_calendar_strip(stdscr, year, month, today_day, notes, y0, x0, width, height):
@@ -1033,6 +1133,89 @@ def draw_matched(stdscr, y, x, text, query, max_w, base_style, match_style):
     safe_addstr(stdscr, y, x + idx + len(query), text[idx + len(query):], base_style)
 
 
+LAUNCHER_STRIP_H = 5  # border(1) + query řádek(1) + ikonky(1) + hint(1) + border(1)
+
+# Barvy pro monogramový placeholder - cyklí se podle jména appky, ať nejsou
+# všechny stejnou barvou. Až budou reálné .png ikonky (Icon= z .desktop +
+# kitty image protokol, stejný princip jako u workspace náhledů), stačí
+# vyměnit JEN _app_icon_placeholder() - volání v draw_launcher_strip zůstane
+# stejné (jméno appky dovnitř, "vizuál" ven).
+_MONOGRAM_COLORS = [3, 4, 2, 5]
+
+
+def _app_icon_placeholder(name):
+    """Placeholder ikonka: první písmeno appky + barva odvozená ze jména
+    (stejná appka = vždy stejná barva). Vrací (písmeno, color_pair index)."""
+    letter = (name.strip()[:1] or "?").upper()
+    color_idx = _MONOGRAM_COLORS[sum(ord(c) for c in name) % len(_MONOGRAM_COLORS)]
+    return letter, color_idx
+
+
+def draw_launcher_strip(stdscr, query, results, sel, y0, x0, width, height, active=True):
+    """Horizontální strip nad hlavním náhledem + bary - appky zleva doprava,
+    každá jako [monogram] Name. Vybraná položka reverzní. Pokud se vybraná
+    položka nevejde do okna spočítaného od začátku seznamu, okno se
+    přepočítá tak, aby začínalo přímo na ní (jednoduchý "snap" scroll bez
+    nutnosti držet si offset mezi snímky).
+
+    Natrvalo rezervovaný prostor (viz main_y0/main_h v main()) - i mimo
+    hledání (active=False) se pořád kreslí, jen v klidovém stavu místo
+    query/výsledků/hintu ukáže jednu nápovědu, ať náhled+bary neposkakují,
+    když se hledání zapne/vypne."""
+    draw_box(stdscr, y0, x0, height, width, active, "Launcher")
+    query_row = y0 + 1
+    items_row = y0 + 2
+    hint_row = y0 + height - 2
+    avail_w = width - 4
+
+    if not active:
+        idle = "start typing to search apps…"
+        safe_addstr(stdscr, items_row, x0 + width // 2 - len(idle) // 2, idle, curses.color_pair(6))
+        return
+
+    safe_addstr(stdscr, query_row, x0 + 2, f"> {query}"[:width - 4].ljust(width - 4),
+                curses.color_pair(3) | curses.A_BOLD)
+
+    if not results:
+        safe_addstr(stdscr, items_row, x0 + 2, "(no match)", curses.color_pair(5))
+    else:
+        def item_width(name):
+            return 4 + len(name[:14]) + 2  # "[X] " + label + mezera za položkou
+
+        def build_window(start):
+            cx, shown = 0, []
+            for i in range(start, len(results)):
+                iw = item_width(results[i][0])
+                if cx + iw > avail_w and shown:
+                    break
+                shown.append(i)
+                cx += iw
+            return shown
+
+        shown = build_window(0)
+        if sel not in shown:
+            shown = build_window(sel)
+
+        cx = x0 + 2
+        for i in shown:
+            name, _cmd = results[i]
+            letter, color_idx = _app_icon_placeholder(name)
+            label = name[:14]
+            is_sel = (i == sel)
+            badge_style = curses.color_pair(7) | curses.A_REVERSE if is_sel else curses.color_pair(color_idx) | curses.A_BOLD
+            text_style = curses.color_pair(3) | curses.A_REVERSE if is_sel else curses.color_pair(1)
+            match_style = curses.color_pair(3) | curses.A_REVERSE if is_sel else curses.color_pair(4) | curses.A_BOLD
+            safe_addstr(stdscr, items_row, cx, f"[{letter}]", badge_style)
+            draw_matched(stdscr, items_row, cx + 4, label, query, len(label), text_style, match_style)
+            cx += item_width(name)
+        if shown and shown[-1] < len(results) - 1:
+            remaining = len(results) - 1 - shown[-1]
+            safe_addstr(stdscr, items_row, cx, f"+{remaining}", curses.color_pair(6))
+
+    hint = "←/→ vybrat   Enter: spustit   Esc: zrušit"
+    safe_addstr(stdscr, hint_row, x0 + width // 2 - len(hint) // 2, hint, curses.color_pair(2))
+
+
 # ---------- sidebar: workspace boxíky (1-10, vždy všechny) ----------
 
 def draw_workspace_boxes(stdscr, ws_apps, selected_num, y0, x0, width, avail_h, count=WS_COUNT):
@@ -1064,7 +1247,6 @@ def draw_workspace_boxes(stdscr, ws_apps, selected_num, y0, x0, width, avail_h, 
 
 def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
                   timer_values, timer_field, ws_apps,
-                  launcher_active, launcher_query, launcher_results, launcher_sel,
                   focused=True):
     draw_box(stdscr, y0, x0, height, width, focused)
 
@@ -1074,28 +1256,11 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
 
     selected_ws_num = items[selected][0] if items[selected][1] == "workspace" else None
 
-    if launcher_active:
-        # Launcher normálně vůbec není vidět - objeví se jen dokud se píše,
-        # a Workspaces mu ustoupí do zbylého prostoru dole.
-        band_h = max(content_h // 2, 5)
-        band1_y = y0 + 1
-        ws_y = band1_y + band_h
-        ws_avail = content_h - band_h - 1
-
-        safe_addstr(stdscr, band1_y, x0 + 2, "── Launcher ──"[:width - 4], curses.color_pair(6))
-        safe_addstr(stdscr, band1_y + 1, x0 + 2, f"> {launcher_query}"[:width - 4].ljust(width - 4),
-                    curses.color_pair(3) | curses.A_BOLD)
-        if launcher_results:
-            for n, (name, _cmd) in enumerate(launcher_results[:band_h - 3]):
-                row = band1_y + 2 + n
-                style = curses.color_pair(3) | curses.A_REVERSE if n == launcher_sel else curses.color_pair(1)
-                match_style = style if n == launcher_sel else curses.color_pair(4) | curses.A_BOLD
-                draw_matched(stdscr, row, x0 + 2, name, launcher_query, width - 4, style, match_style)
-        else:
-            safe_addstr(stdscr, band1_y + 2, x0 + 2, "(no match)", curses.color_pair(5))
-    else:
-        ws_y = y0 + 1
-        ws_avail = content_h - 1
+    # Launcher žil dřív tady jako vertikální band nad workspace boxíky -
+    # přestěhoval se do horizontálního stripu nad hlavním náhledem
+    # (draw_launcher_strip), takže sidebar má teď vždy pevnou plnou výšku.
+    ws_y = y0 + 1
+    ws_avail = content_h - 1
 
     # --- Workspace boxíky 1-10, vždy VŠECHNY vidět, žádné scrollování ---
     draw_workspace_boxes(stdscr, ws_apps, selected_ws_num, ws_y, x0, width, ws_avail)
@@ -1249,13 +1414,27 @@ def main(stdscr):
         workspaces, ws_apps = get_workspaces_cached()  # TTL cache - viz get_workspaces_cached()
         h, w = stdscr.getmaxyx()
         side_w = max(w // 5, 20)
-        cx0, cy0 = side_w + 1, 1
+        cx0, cy0 = side_w + 1, 0
         cwidth = (w - side_w) - 2
-        cheight = (h - 1) - WEATHER_STRIP_H
+        cheight = h - WEATHER_STRIP_H
+        # main_pane_w je o 1 širší než cwidth - pravý okraj vbars tak splyne
+        # s vnějším rámečkem (stejný trik jako u cy0 nahoře), místo aby
+        # zůstal o sloupec odsazený a dělal dvojitou "utrženou" čáru.
+        # Calendar/Weather dole (cwidth beze změny) v tom normálním odstupu zůstávají.
+        main_pane_w = cwidth + 1
+        preview_w = main_pane_w - VBARS_W - 1  # -1 = mezera mezi náhledem a bary
+        vbars_x = cx0 + preview_w + 1
         strip_y = cy0 + cheight
         cal_w = (cwidth - 1) * 2 // 5  # poměr 2:3 kalendář:weather
         weather_x = cx0 + cal_w + 1
         weather_w = cwidth - cal_w - 1
+
+        # Launcher je horizontální strip NAD náhledem+bary - natrvalo
+        # rezervovaný (ne jen když se zrovna píše), ať se náhled/bary
+        # neposouvají při zahájení/ukončení hledání. Calendar/Weather dole
+        # zůstávají netknuté (strip_y počítaný z cheight výše, ne z main_h).
+        main_y0 = cy0 + LAUNCHER_STRIP_H
+        main_h = cheight - LAUNCHER_STRIP_H
 
         launcher_results = filter_apps(all_apps, launcher_query) if launcher_active else []
         if launcher_sel >= len(launcher_results):
@@ -1267,13 +1446,15 @@ def main(stdscr):
         # pravého dolního rohu okna může shodit error), nic to nerozbije -
         # nanejvýš by se ten jeden roh nedokreslil.
         draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
-                     timer_values, timer_field, ws_apps,
-                     launcher_active, launcher_query, launcher_results, launcher_sel, focused=True)
+                     timer_values, timer_field, ws_apps, focused=True)
         draw_box(stdscr, 0, side_w, h, w - side_w, False)
         today = datetime.date.today()
         render_calendar_strip(stdscr, today.year, today.month, today.day, load_notes_cached(),
                                strip_y, cx0, cal_w, WEATHER_STRIP_H)
         draw_weather_strip(stdscr, strip_y, weather_x, weather_w, WEATHER_STRIP_H)
+
+        draw_launcher_strip(stdscr, launcher_query, launcher_results, launcher_sel,
+                             cy0, cx0, main_pane_w, LAUNCHER_STRIP_H, active=launcher_active)
 
         item_id, kind, _extra = sidebar_items[sel_side]
         pending_thumbs = []
@@ -1282,11 +1463,15 @@ def main(stdscr):
             ws = next((wsp for wsp in workspaces if wsp["num"] == num), None)
             out_name = ws.get("output") if ws else None
             output_dims = output_res.get(out_name, fallback_output_dims)
-            pending_thumbs = draw_workspace_preview(stdscr, num, ws, output_dims, cy0, cx0, cwidth, cheight)
+            pending_thumbs = draw_workspace_preview(stdscr, num, ws, output_dims, main_y0, cx0, preview_w, main_h)
         elif kind in ("wifi", "bt", "timer"):
             pass  # stav a ovládání se teď dějí přímo v pinnutém boxíku v sidebaru
         elif kind == "power":
-            draw_power_preview(stdscr, item_id, cy0, cx0, cwidth, cheight)
+            draw_power_preview(stdscr, item_id, main_y0, cx0, preview_w, main_h)
+
+        # volume/brightness bary - nezávisle na tom, co je zrovna v hlavním
+        # náhledu, vždy vpravo vedle něj, ve stejné výšce (ne přes weather)
+        draw_vbars(stdscr, get_volume(), get_brightness(), main_y0, vbars_x, VBARS_W, main_h)
 
         stdscr.refresh()
         # AŽ TEĎ, mimo curses - viz komentář u render_kitty_thumbnails() výš
@@ -1306,8 +1491,7 @@ def main(stdscr):
             return
         if key == CALENDAR_KEY:
             draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
-                         timer_values, timer_field, ws_apps,
-                         launcher_active, launcher_query, launcher_results, launcher_sel, focused=False)
+                         timer_values, timer_field, ws_apps, focused=False)
             draw_box(stdscr, 0, side_w, h, w - side_w, True)
             stdscr.refresh()
             _kitty_clear_placements()  # run_calendar má vlastní smyčku - hlavní tik, co jinak čistí staré thumbnaily, se dokud běží vůbec nezavolá
@@ -1335,9 +1519,9 @@ def main(stdscr):
                     launcher_sel = 0
                 else:
                     launcher_active = False
-            elif key == curses.KEY_UP:
+            elif key == curses.KEY_LEFT:
                 launcher_sel = max(launcher_sel - 1, 0)
-            elif key == curses.KEY_DOWN:
+            elif key == curses.KEY_RIGHT:
                 launcher_sel = min(launcher_sel + 1, max(len(launcher_results) - 1, 0))
             elif key in (10, 13):
                 if launcher_results:
