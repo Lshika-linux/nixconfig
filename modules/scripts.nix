@@ -4,11 +4,6 @@ let
 in
 {
 
-home.file."scripts_sway/powermenu.py" = {
-  executable = true;
-  source = ../modules/powermenu.py;
-};
-
 home.file."scripts_sway/lock.sh" = {
   executable = true;
   text = ''
@@ -55,27 +50,6 @@ home.file."scripts_sway/screenshot.sh" = {
   '';
 };
 
-home.file."scripts_sway/timer.py" = {
-  executable = true;
-  source = ../modules/timer.py;
-};
-
-home.file.".config/wob/wob.ini".text = ''
-  timeout = 1000
-  anchor = right center
-  margin = 20
-  width = 30
-  height = 600
-  orientation = vertical
-  border_offset = 0
-  border_size = 2
-  bar_padding = 2
-  
-  [style.default]
-  background_color = 000000AA
-  border_color = FFFFFFFF
-  bar_color = FFFFFFFF
-'';
 
 home.file."scripts_sway/meow.mp3".source = ../sounds/meow.mp3;
 home.file."scripts_sway/minecraftcat.mp3".source = ../sounds/minecraftcat.mp3;
@@ -246,31 +220,6 @@ for i in inputs:
   '';
 };
 
-home.file."scripts_sway/switcher.py" = {
-  executable = true;
-  source = ../modules/switcher.py;
-};
-
-home.file."scripts_sway/launcher.py" = {
-  executable = true;
-  source = ../modules/launcher.py;
-};
-
-home.file."scripts_sway/connectivity.py" = {
-  executable = true;
-  source = ../modules/connectivity.py;
-};
-
-home.file."scripts_sway/raficalendar.py" = {
-  executable = true;
-  source = ../modules/raficalendar.py;
-};
-
-home.file."scripts_sway/weather.py" = {
-  executable = true;
-  source = ../modules/weather.py;
-};
-
 home.file."scripts_sway/cockpit_daemon.py" = {
   executable = true;
   source = ../modules/cockpit_daemon.py;
@@ -289,33 +238,6 @@ systemd.user.services.cockpit-daemon = {
   };
   Service = {
     ExecStart = "${pkgs.python3}/bin/python3 %h/scripts_sway/cockpit_daemon.py";
-    Restart = "on-failure";
-    RestartSec = 2;
-  };
-  Install = {
-    WantedBy = [ "graphical-session.target" ];
-  };
-};
-
-home.file."scripts_sway/cockpit_client.py" = {
-  executable = true;
-  source = ../modules/cockpit_client.py;
-};
-
-### nova koncepce, old switcher.py!
-home.file."scripts_sway/cockpit_photographer.py" = {
-  executable = true;
-  source = ../modules/cockpit_photographer.py;
-};
-
-systemd.user.services.cockpit-photographer = {
-  Unit = {
-    Description = "Cockpit window thumbnail photographer (i3ipc events -> grim)";
-    After = [ "graphical-session.target" ];
-    PartOf = [ "graphical-session.target" ];
-  };
-  Service = {
-    ExecStart = "${cockpitPython}/bin/python3 %h/scripts_sway/cockpit_photographer.py";
     Restart = "on-failure";
     RestartSec = 2;
   };
