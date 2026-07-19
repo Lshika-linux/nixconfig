@@ -155,12 +155,143 @@ def switch_workspace(num):
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def get_workspace_apps():
-    """Projde CELÝ sway strom jednou (get_tree) a vrátí {ws_num: [app, ...]} -
-    jeden běh nahradí dotazování po jednotlivých workspacech. Používá app_id
-    (wayland-native okna), s fallbackem na window_properties.class pro
-    xwayland appky, co app_id nenastavují. Vlastní cockpit okna (dashboard
-    sám na sobě, když je fullscreen nad něčím jiným) jsou vyfiltrovaná."""
+def _get_leaf_con_ids():
+    """Sway con id všech oken (leaf uzlů se skutečným app_id/class) v celém
+    stromu - použito na diff "co je nového" po spuštění appky z launcheru."""
+    try:
+        r = subprocess.run(["swaymsg", "-t", "get_tree"],
+                            capture_output=True, text=True, timeout=2)
+        tree = json.loads(r.stdout)
+    except Exception:
+        return set()
+    ids = set()
+
+    def walk(node):
+        is_window = not node.get("nodes") and not node.get("floating_nodes") and (
+            node.get("app_id") or (node.get("window_properties") or {}).get("class"))
+        if is_window and node.get("id") is not None:
+            ids.add(node["id"])
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            walk(child)
+
+    walk(tree)
+    return ids
+
+
+_claimed_con_ids = set()
+_claim_lock = threading.Lock()
+
+
+def launch_app_on_workspace(cmd, target_num=None):
+    """Spustí appku z launcheru BEZ přepnutí fokusu pryč z dashboardu -
+    žádné close_self(), dashboard zůstává fullscreen a viditelný přesně tak,
+    jak byl (appka se fyzicky spustí na workspace, co je aktuálně fokusnutý
+    ve Sway = workspace dashboardu). Pokud je zadaný target_num, background
+    thread ji tiše přesune tam přes `move to workspace number N` - `move`
+    NA ROZDÍL od `workspace number N` fokus nemění, takže se dashboard
+    nikdy nezobrazí jinam."""
+    before = _get_leaf_con_ids() if target_num is not None else None
+
+    subprocess.Popen(["sh", "-c", cmd], start_new_session=True,
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    if target_num is None:
+        return
+
+    def worker():
+        for _ in range(30):  # ~6s při 0.2s kroku - i pomaleji startující appky (Electron apod.) to stihnou
+            time.sleep(0.2)
+            now = _get_leaf_con_ids()
+            with _claim_lock:
+                new_ids = (now - before) - _claimed_con_ids
+                if new_ids:
+                    con_id = next(iter(new_ids))
+                    _claimed_con_ids.add(con_id)
+                    subprocess.run(
+                        ["swaymsg", f"[con_id={con_id}] move to workspace number {target_num}"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _node_window_name(node):
+    """Jméno appky pro leaf okno (app_id, fallback window_properties.class
+    pro xwayland appky, co app_id nenastavují), nebo None když to není leaf
+    okno."""
+    if node.get("nodes") or node.get("floating_nodes"):
+        return None
+    return node.get("app_id") or (node.get("window_properties") or {}).get("class")
+
+
+def _is_cockpit_subtree(node):
+    """True, pokud podstrom neobsahuje ŽÁDNÉ okno kromě cockpitových -
+    takový uzel se při rekonstrukci layoutu úplně vypustí (viz _layout_node)."""
+    name = _node_window_name(node)
+    if name is not None:
+        return name in COCKPIT_OWN_APP_IDS
+    children = node.get("nodes", []) + node.get("floating_nodes", [])
+    return all(_is_cockpit_subtree(c) for c in children) if children else True
+
+
+def _layout_node(node, x, y, w, h, out):
+    """Rekonstruuje layout ze STRUKTURY sway stromu do normalizovaných
+    souřadnic 0..1, ne z absolutních rectů.
+
+    Tím se elegantně řeší, že cockpit sám je v tiling stromu jen další
+    sibling ve splitu (fullscreen je způsob vykreslení, ne změna layoutu),
+    takže si drží svůj slot i když ho z výpisu vyfiltrujeme. Místo
+    dodatečných korekcí absolutních souřadnic ten uzel prostě VYNECHÁME a
+    jeho podíl rozdělíme mezi zbylé sourozence proporčně podle jejich
+    velikosti - přesně to, co by sway udělal, kdyby se to okno zavřelo.
+    Výsledek je konzistentní bez ohledu na to, kde v splitu cockpit ležel
+    a jestli na tom workspace vůbec je."""
+    name = _node_window_name(node)
+    if name is not None:
+        if name not in COCKPIT_OWN_APP_IDS:
+            out.append({"name": name, "n": (x, y, w, h)})
+        return
+
+    tiling = [c for c in node.get("nodes", []) if not _is_cockpit_subtree(c)]
+    floating = [c for c in node.get("floating_nodes", []) if not _is_cockpit_subtree(c)]
+
+    if tiling:
+        layout = node.get("layout", "splith")
+        if layout in ("tabbed", "stacked"):
+            # sway ukazuje jen jednu záložku - vezmi tu fokusnutou (první id
+            # ve focus listu), ať náhled nekreslí několik oken přes sebe
+            focus = node.get("focus") or []
+            chosen = next((c for c in tiling if c.get("id") == focus[0]), tiling[0]) if focus else tiling[0]
+            _layout_node(chosen, x, y, w, h, out)
+        else:
+            horiz = layout == "splith"
+            key = "width" if horiz else "height"
+            weights = [max(c.get("rect", {}).get(key, 0), 1) for c in tiling]
+            total = sum(weights)
+            pos = x if horiz else y
+            for child, weight in zip(tiling, weights):
+                share = (w if horiz else h) * weight / total
+                if horiz:
+                    _layout_node(child, pos, y, share, h, out)
+                else:
+                    _layout_node(child, x, pos, w, share, out)
+                pos += share
+
+    # floating okna nejsou součástí splitu - drží si vlastní pozici, takže
+    # se normalizují přímo proti workspace rectu (viz get_workspace_layout)
+    for child in floating:
+        _layout_node(child, x, y, w, h, out)
+
+
+def get_workspace_layout():
+    """Projde CELÝ sway strom jednou (get_tree) a vrátí
+    {ws_num: {"aspect": (w, h), "windows": [{"name", "n": (x,y,w,h)}, ...]}},
+    kde "n" jsou NORMALIZOVANÉ souřadnice 0..1 uvnitř workspace, spočítané
+    rekonstrukcí stromu splitů (viz _layout_node) - ne z absolutních rectů.
+
+    Žádný screenshot, žádný grim - funguje stejně dobře i pro workspace, co
+    zrovna není vidět, protože Sway si layout počítá pořád, bez ohledu na
+    to, jestli se něco vykresluje na obrazovku."""
     try:
         r = subprocess.run(["swaymsg", "-t", "get_tree"],
                             capture_output=True, text=True, timeout=2)
@@ -170,33 +301,28 @@ def get_workspace_apps():
 
     result = {}
 
-    def walk(node, ws_num):
+    def find_workspaces(node):
         if node.get("type") == "workspace":
             try:
-                ws_num = int(node.get("num"))
+                num = int(node.get("num"))
             except (TypeError, ValueError):
-                ws_num = None
-        if ws_num is not None:
-            name = node.get("app_id") or (node.get("window_properties") or {}).get("class")
-            if name and name not in COCKPIT_OWN_APP_IDS:
-                result.setdefault(ws_num, []).append(name)
+                return
+            rect = node.get("rect", {})
+            windows = []
+            _layout_node(node, 0.0, 0.0, 1.0, 1.0, windows)
+            result[num] = {
+                "aspect": (rect.get("width", 16) or 16, rect.get("height", 9) or 9),
+                "windows": windows,
+            }
+            return
         for child in node.get("nodes", []) + node.get("floating_nodes", []):
-            walk(child, ws_num)
+            find_workspaces(child)
 
-    walk(tree, None)
+    find_workspaces(tree)
     return result
 
 
-def get_outputs():
-    try:
-        r = subprocess.run(["swaymsg", "-t", "get_outputs"],
-                            capture_output=True, text=True, timeout=2)
-        return json.loads(r.stdout)
-    except Exception:
-        return []
-
-
-_ws_cache = {"workspaces": [], "apps": {}, "ts": 0.0}
+_ws_cache = {"workspaces": [], "apps": {}, "layout": {}, "ts": 0.0}
 _WS_CACHE_TTL = 1.5  # sekund - stejný princip jako u wifi/bt cache, ať se
                       # get_tree/get_workspaces netahá 3x/s při 300ms tiku hlavní smyčky
 
@@ -205,9 +331,11 @@ def get_workspaces_cached():
     now = time.time()
     if now - _ws_cache["ts"] > _WS_CACHE_TTL:
         _ws_cache["workspaces"] = get_workspaces()
-        _ws_cache["apps"] = get_workspace_apps()
+        layout = get_workspace_layout()
+        _ws_cache["layout"] = layout
+        _ws_cache["apps"] = {num: [w["name"] for w in data["windows"]] for num, data in layout.items()}
         _ws_cache["ts"] = now
-    return _ws_cache["workspaces"], _ws_cache["apps"]
+    return _ws_cache["workspaces"], _ws_cache["apps"], _ws_cache["layout"]
 
 
 # ---------- náhledy oken (kitty graphics protocol) ----------
@@ -450,6 +578,105 @@ def safe_addstr(stdscr, y, x, text, attr=0):
 
 
 # ---------- pravý panel: náhled workspace ----------
+#
+# draw_workspace_preview() níž (screenshot přes photographer/grim) je od
+# zavedení draw_workspace_grid() v main() už nevolaná - necháno pro
+# referenci/pro případ, že by se k reálným screenshotům chtěl vrátit.
+# Grid dole je čistě z živých dat (get_tree), žádný photographer potřeba.
+
+GRID_COLS = 5
+GRID_ROWS = 2  # GRID_COLS * GRID_ROWS musí sedět na WS_COUNT (5*2=10) - fallback default
+
+
+def best_grid_layout(avail_w, avail_h, count=WS_COUNT):
+    """Vybere (cols, rows) z dělitelů count tak, aby jedna dlaždice (16:9,
+    letterboxovaná uvnitř svého slotu) vyšla co největší pro DANÝ tvar
+    dostupného prostoru - žádné natvrdo zadrátované rozvržení. Pro
+    WS_COUNT=10 to reálně vybírá mezi 5x2/2x5/10x1/1x10."""
+    candidates = [(c, count // c) for c in range(1, count + 1) if count % c == 0]
+    best, best_area = (GRID_COLS, GRID_ROWS), -1
+    for cols, rows in candidates:
+        slot_w, slot_h = avail_w / cols, avail_h / rows
+        if slot_w < 4 or slot_h < 3:
+            continue
+        box_w_px, box_h_px = slot_w, slot_h * CELL_ASPECT
+        target = 16 / 9
+        tw, th = (box_w_px, box_w_px / target) if target > box_w_px / box_h_px else (box_h_px * target, box_h_px)
+        area = tw * th
+        if area > best_area:
+            best_area, best = area, (cols, rows)
+    return best
+
+
+def draw_workspace_tile(stdscr, num, data, y0, x0, width, height, focused=False):
+    """Vykreslí JEDEN workspace (rámeček + okna uvnitř) do zadaného
+    obdélníku - čistě z living sway tree dat (žádný screenshot, žádný
+    photographer). Okna přicházejí v NORMALIZOVANÝCH souřadnicích 0..1
+    (viz get_workspace_layout / _layout_node), takže se sem jen přeškálují
+    na dostupné znakové buňky. Sdílené jádro pro draw_workspace_grid (malá
+    dlaždice) i pro jednotný velký náhled v main() (celá plocha)."""
+    if width < 3 or height < 3:
+        return
+    draw_box(stdscr, y0, x0, height, width, focused, str(num))
+
+    inner_w, inner_h = width - 2, height - 2
+    windows = data.get("windows") if data else None
+    if not windows or inner_w < 2 or inner_h < 2:
+        if not windows and inner_w >= 5 and inner_h >= 1:
+            label = "empty"
+            safe_addstr(stdscr, y0 + height // 2, x0 + max((width - len(label)) // 2, 1),
+                        label, curses.color_pair(6))
+        return
+
+    # plocha náhledu ve stejném poměru stran, jako má reálná obrazovka
+    aspect_w, aspect_h = data.get("aspect", (16, 9))
+    c, r, off_x, off_y = _fit_aspect(inner_w, inner_h, aspect_w, aspect_h)
+    base_x, base_y = x0 + 1 + off_x, y0 + 1 + off_y
+    max_x, max_y = base_x + c, base_y + r
+
+    # větší okna první, menší (typicky floating popup) se dokreslí přes ně
+    # navrch - reálný z-order Sway přes tree nezjistíme, tohle je rozumná aproximace
+    for win in sorted(windows, key=lambda win: win["n"][2] * win["n"][3], reverse=True):
+        nx, ny, nw, nh = win["n"]
+        wx = base_x + max(round(nx * c), 0)
+        wy = base_y + max(round(ny * r), 0)
+        ww = max(min(max(round(nw * c), 1), max_x - wx), 1)
+        wh = max(min(max(round(nh * r), 1), max_y - wy), 1)
+
+        letter, color_idx = _app_icon_placeholder(win["name"])
+        style = curses.color_pair(color_idx) | curses.A_BOLD
+
+        if ww >= 3 and wh >= 2:
+            draw_box(stdscr, wy, wx, wh, ww, False)
+            label = win["name"][:ww - 2]
+            safe_addstr(stdscr, wy + wh // 2, wx + max((ww - len(label)) // 2, 1), label, style)
+        else:
+            safe_addstr(stdscr, wy, wx, letter, style)
+
+
+def draw_workspace_grid(stdscr, layout, selected_num, y0, x0, width, height,
+                         cols=GRID_COLS, rows=GRID_ROWS, count=WS_COUNT):
+    """Grid VŠECH workspace najednou (nepoužívané od návratu k jednomu
+    velkému náhledu - necháno pro referenci/pro případ, že by ses k tomu
+    chtěl vrátit). Vykreslené čistě z living sway tree dat
+    (get_workspace_layout), ne ze screenshotu."""
+    cell_w = width // cols
+    cell_h = height // rows
+    for i in range(count):
+        num = i + 1
+        col, row = i % cols, i // cols
+        slot_x = x0 + col * cell_w
+        slot_y = y0 + row * cell_h
+        slot_w = cell_w if col < cols - 1 else width - col * cell_w
+        slot_h = cell_h if row < rows - 1 else height - row * cell_h
+        if slot_w < 4 or slot_h < 3:
+            continue
+
+        cw, ch, off_x, off_y = _fit_aspect(slot_w, slot_h, 16, 9)
+        cx = slot_x + off_x
+        cy = slot_y + off_y
+        draw_workspace_tile(stdscr, num, layout.get(num), cy, cx, cw, ch, focused=(num == selected_num))
+
 
 def draw_workspace_preview(stdscr, ws_num, ws, output_dims, y0, x0, width, height):
     """Náhled na CELÝ output (fyzický monitor, i s barem) - ne jen workspace
@@ -575,12 +802,13 @@ VBARS_W = 11  # border+pad(2) + bar(3) + gap(1) + bar(3) + pad+border(2)
 
 
 def draw_vbars(stdscr, volume, brightness, y0, x0, width, height):
-    """Dva vertikální bary vedle sebe (hlasitost, jas), v rámečku (viz
-    main_pane_w v main() - jeho pravý okraj je schválně zarovnaný přesně
-    na vnější rámeček, ne o 1 sloupec vedle - to dřív dělalo tu "utrženou"
-    dvojitou čáru). Bary NEJDOU až úplně nahoru - ukotvené dole, těsně nad
-    nimi je jen krátký label (VOL/BRI), nahoře v boxu zůstává prázdný
-    prostor. Čistě bílé, žádné procentní číslo - to už nese výška baru."""
+    """Dva vertikální bary vedle sebe (hlasitost, jas), v rámečku. Pravý
+    okraj sedí přesně na posledním sloupci obrazovky (viz vbars_x/preview_w
+    v main()) - žádný samostatný "vnější rámeček" navíc teď není, takže
+    žádné zarovnávací triky nejsou potřeba. Bary NEJDOU až úplně nahoru -
+    ukotvené dole, těsně nad nimi je jen krátký label (VOL/BRI), nahoře v
+    boxu zůstává prázdný prostor. Čistě bílé, žádné procentní číslo - to
+    už nese výška baru."""
     draw_box(stdscr, y0, x0, height, width, False)
     content_rows = height - 2
     label_row = y0 + height - 2
@@ -1246,8 +1474,9 @@ def draw_workspace_boxes(stdscr, ws_apps, selected_num, y0, x0, width, avail_h, 
 # ---------- sidebar ----------
 
 def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
-                  timer_values, timer_field, ws_apps,
-                  focused=True):
+                  timer_values, timer_field, ws_apps, focused=True):
+    """Plný sidebar - 10 workspace boxíků nahoře (viz draw_workspace_boxes),
+    pinnuté Timer/WiFi/BT/PowerMenu dole."""
     draw_box(stdscr, y0, x0, height, width, focused)
 
     power_block_h = len(POWER_OPTIONS) + 2
@@ -1255,10 +1484,6 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
     content_h = height - 2 - power_block_h - conn_block_h
 
     selected_ws_num = items[selected][0] if items[selected][1] == "workspace" else None
-
-    # Launcher žil dřív tady jako vertikální band nad workspace boxíky -
-    # přestěhoval se do horizontálního stripu nad hlavním náhledem
-    # (draw_launcher_strip), takže sidebar má teď vždy pevnou plnou výšku.
     ws_y = y0 + 1
     ws_avail = content_h - 1
 
@@ -1377,11 +1602,7 @@ def main(stdscr):
                           # i bez stisku klávesy (WiFi signál / BT baterie
                           # a stav se doťáhnou téměř okamžitě po Enteru)
 
-    workspaces, ws_apps = get_workspaces_cached()
-    outputs = get_outputs()
-    output_res = {o["name"]: (o["rect"]["width"], o["rect"]["height"])
-                   for o in outputs if o.get("active") and o.get("rect")}
-    fallback_output_dims = next(iter(output_res.values()), (0, 0))
+    workspaces, ws_apps, ws_layout = get_workspaces_cached()
 
     sidebar_items = [(num, "workspace", "") for num in range(1, WS_COUNT + 1)]
     sidebar_items += [
@@ -1400,7 +1621,7 @@ def main(stdscr):
     all_apps = scan_desktop_apps()
     timer_values = [0, 0, 0]
     timer_field = 0
-    WEATHER_STRIP_H = 12  # o další řádek víc
+    WEATHER_STRIP_H = 12
 
     # Launcher normálně vůbec není vidět - žádná položka v sidebar_items,
     # žádné Tab cyklení. Objeví se, jakmile se začne psát cokoliv
@@ -1411,16 +1632,16 @@ def main(stdscr):
 
     while True:
         stdscr.erase()  # ne clear() - to force-touchne celé okno a zbytečně bliká
-        workspaces, ws_apps = get_workspaces_cached()  # TTL cache - viz get_workspaces_cached()
+        workspaces, ws_apps, ws_layout = get_workspaces_cached()  # TTL cache - viz get_workspaces_cached()
         h, w = stdscr.getmaxyx()
         side_w = max(w // 5, 20)
         cx0, cy0 = side_w + 1, 0
         cwidth = (w - side_w) - 2
         cheight = h - WEATHER_STRIP_H
         # main_pane_w je o 1 širší než cwidth - pravý okraj vbars tak splyne
-        # s vnějším rámečkem (stejný trik jako u cy0 nahoře), místo aby
-        # zůstal o sloupec odsazený a dělal dvojitou "utrženou" čáru.
-        # Calendar/Weather dole (cwidth beze změny) v tom normálním odstupu zůstávají.
+        # s vnějším rámečkem, místo aby zůstal o sloupec odsazený a dělal
+        # dvojitou "utrženou" čáru. Calendar/Weather dole (cwidth beze
+        # změny) v tom normálním odstupu zůstávají.
         main_pane_w = cwidth + 1
         preview_w = main_pane_w - VBARS_W - 1  # -1 = mezera mezi náhledem a bary
         vbars_x = cx0 + preview_w + 1
@@ -1457,25 +1678,20 @@ def main(stdscr):
                              cy0, cx0, main_pane_w, LAUNCHER_STRIP_H, active=launcher_active)
 
         item_id, kind, _extra = sidebar_items[sel_side]
-        pending_thumbs = []
+
+        # Jeden velký náhled TOHO, co je zrovna vybrané Tabem v sidebaru -
+        # pro workspace čistě z living sway tree dat (draw_workspace_tile,
+        # žádný screenshot/photographer), pro Power classic textový preview.
         if kind == "workspace":
-            num = item_id
-            ws = next((wsp for wsp in workspaces if wsp["num"] == num), None)
-            out_name = ws.get("output") if ws else None
-            output_dims = output_res.get(out_name, fallback_output_dims)
-            pending_thumbs = draw_workspace_preview(stdscr, num, ws, output_dims, main_y0, cx0, preview_w, main_h)
-        elif kind in ("wifi", "bt", "timer"):
-            pass  # stav a ovládání se teď dějí přímo v pinnutém boxíku v sidebaru
+            draw_workspace_tile(stdscr, item_id, ws_layout.get(item_id), main_y0, cx0, preview_w, main_h)
         elif kind == "power":
             draw_power_preview(stdscr, item_id, main_y0, cx0, preview_w, main_h)
+        # wifi/bt/timer: stav a ovládání se dějí přímo v pinnutém boxíku v sidebaru
 
-        # volume/brightness bary - nezávisle na tom, co je zrovna v hlavním
-        # náhledu, vždy vpravo vedle něj, ve stejné výšce (ne přes weather)
+        # volume/brightness bary - vždy vpravo vedle náhledu, ve stejné výšce (ne přes weather)
         draw_vbars(stdscr, get_volume(), get_brightness(), main_y0, vbars_x, VBARS_W, main_h)
 
         stdscr.refresh()
-        # AŽ TEĎ, mimo curses - viz komentář u render_kitty_thumbnails() výš
-        render_kitty_thumbnails(pending_thumbs)
         key = stdscr.getch()
 
         # globální zkratky - fungují odkudkoliv v hlavní smyčce.
@@ -1526,11 +1742,17 @@ def main(stdscr):
             elif key in (10, 13):
                 if launcher_results:
                     cmd = launcher_results[launcher_sel][1]
-                    close_self()
-                    _kitty_clear_placements()
-                    subprocess.Popen(["sh", "-c", cmd], start_new_session=True,
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    return
+                    # item_id/kind jsou z výběru v sidebaru (viz výš v téhle
+                    # iteraci smyčky) - pokud je Tabem zafokusovaný nějaký
+                    # workspace, appka tam tiše doputuje na pozadí, ale
+                    # dashboard se NEZAVÍRÁ a fokus se nikam nepřepíná, ať
+                    # jde spustit klidně víc appek za sebou (viz
+                    # launch_app_on_workspace).
+                    target_num = item_id if kind == "workspace" else None
+                    launch_app_on_workspace(cmd, target_num)
+                    launcher_query = ""
+                    launcher_sel = 0
+                    # launcher_active zůstává True - hned se dá psát další appka
             elif 32 <= key <= 126:
                 launcher_query += chr(key)
                 launcher_sel = 0
