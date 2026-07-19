@@ -1361,7 +1361,7 @@ def draw_matched(stdscr, y, x, text, query, max_w, base_style, match_style):
     safe_addstr(stdscr, y, x + idx + len(query), text[idx + len(query):], base_style)
 
 
-LAUNCHER_STRIP_H = 5  # border(1) + query řádek(1) + ikonky(1) + hint(1) + border(1)
+LAUNCHER_STRIP_H = 4  # border(1) + query řádek(1) + ikonky(1) + border(1)
 
 # Barvy pro monogramový placeholder - cyklí se podle jména appky, ať nejsou
 # všechny stejnou barvou. Až budou reálné .png ikonky (Icon= z .desktop +
@@ -1393,7 +1393,6 @@ def draw_launcher_strip(stdscr, query, results, sel, y0, x0, width, height, acti
     draw_box(stdscr, y0, x0, height, width, active, "Launcher")
     query_row = y0 + 1
     items_row = y0 + 2
-    hint_row = y0 + height - 2
     avail_w = width - 4
 
     if not active:
@@ -1439,9 +1438,6 @@ def draw_launcher_strip(stdscr, query, results, sel, y0, x0, width, height, acti
         if shown and shown[-1] < len(results) - 1:
             remaining = len(results) - 1 - shown[-1]
             safe_addstr(stdscr, items_row, cx, f"+{remaining}", curses.color_pair(6))
-
-    hint = "←/→ vybrat   Enter: spustit   Esc: zrušit"
-    safe_addstr(stdscr, hint_row, x0 + width // 2 - len(hint) // 2, hint, curses.color_pair(2))
 
 
 # ---------- sidebar: workspace boxíky (1-10, vždy všechny) ----------
@@ -1629,6 +1625,7 @@ def main(stdscr):
     launcher_active = False
     launcher_query = ""
     launcher_sel = 0
+    launcher_return_sel = 0  # výběr v sidebaru, kam se fokus vrátí po zavření launcheru
 
     while True:
         stdscr.erase()  # ne clear() - to force-touchne celé okno a zbytečně bliká
@@ -1721,20 +1718,24 @@ def main(stdscr):
             launcher_active = True
             launcher_query = chr(key)
             launcher_sel = 0
+            launcher_return_sel = sel_side  # kam se fokus vrátí po Enter/Esc
             continue
 
         if launcher_active:
             if key == 27:
                 launcher_active = False
                 launcher_query = ""
+                sel_side = launcher_return_sel
             elif key == ord('\t'):
                 launcher_active = False  # Tab = "pryč z hledání", ne skok jinam ve stejném stisku
+                sel_side = launcher_return_sel
             elif key in (curses.KEY_BACKSPACE, 127, 8):
                 if launcher_query:
                     launcher_query = launcher_query[:-1]
                     launcher_sel = 0
                 else:
                     launcher_active = False
+                    sel_side = launcher_return_sel
             elif key == curses.KEY_LEFT:
                 launcher_sel = max(launcher_sel - 1, 0)
             elif key == curses.KEY_RIGHT:
@@ -1744,15 +1745,17 @@ def main(stdscr):
                     cmd = launcher_results[launcher_sel][1]
                     # item_id/kind jsou z výběru v sidebaru (viz výš v téhle
                     # iteraci smyčky) - pokud je Tabem zafokusovaný nějaký
-                    # workspace, appka tam tiše doputuje na pozadí, ale
-                    # dashboard se NEZAVÍRÁ a fokus se nikam nepřepíná, ať
-                    # jde spustit klidně víc appek za sebou (viz
-                    # launch_app_on_workspace).
+                    # workspace, appka tam tiše doputuje na pozadí. Dashboard
+                    # se NEZAVÍRÁ (viz launch_app_on_workspace), ale launcher
+                    # si po spuštění nedrží fokus - vrátí ho tam, kde byl před
+                    # jeho vyvoláním. Další appka se spustí prostě tím, že se
+                    # zase začne psát.
                     target_num = item_id if kind == "workspace" else None
                     launch_app_on_workspace(cmd, target_num)
+                    launcher_active = False
                     launcher_query = ""
                     launcher_sel = 0
-                    # launcher_active zůstává True - hned se dá psát další appka
+                    sel_side = launcher_return_sel
             elif 32 <= key <= 126:
                 launcher_query += chr(key)
                 launcher_sel = 0
