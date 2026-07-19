@@ -215,6 +215,71 @@ def launch_app_on_workspace(cmd, target_num=None):
     threading.Thread(target=worker, daemon=True).start()
 
 
+# ---------- zkracování titulků oken pro výpis v sidebaru ----------
+#
+# Titulek okna (node["name"] ze sway tree) nese to zajímavé, ale u každé
+# appky jinak: terminál má v titulku cestu/běžící program (to chceme celé),
+# prohlížeč má "<stránka> - <web>" (chceme jen ten web, ideálně doménu) a
+# většina ostatních appek má "<dokument> - <něco> - <jméno appky verze>"
+# (chceme jen ten první segment - že je to Obsidian už víme z app_id).
+
+TERMINAL_APPS = {"kitty", "alacritty", "foot", "wezterm", "st", "urxvt", "xterm", "ghostty"}
+BROWSER_APPS = {"librewolf", "firefox", "chromium", "chrome", "google-chrome",
+                 "brave-browser", "zen", "qutebrowser", "vivaldi"}
+# jména prohlížečů, jak se objevují V TITULKU (ne app_id) - zahodit
+BROWSER_TITLE_NAMES = {"librewolf", "mozilla firefox", "firefox", "chromium",
+                        "google chrome", "brave", "zen browser", "vivaldi"}
+
+# známé weby -> doména. Titulek nese jen jméno webu ("Claude"), URL ze sway
+# tree nedostaneme, tak aspoň tohle přemapování na to, co chceš vidět.
+SITE_DOMAINS = {
+    "claude": "claude.ai",
+    "chatgpt": "chatgpt.com",
+    "youtube": "youtube.com",
+    "github": "github.com",
+    "gitlab": "gitlab.com",
+    "reddit": "reddit.com",
+    "gmail": "mail.google.com",
+    "stack overflow": "stackoverflow.com",
+    "wikipedia": "wikipedia.org",
+    "nixos search": "search.nixos.org",
+    "mynixos": "mynixos.com",
+    "seznam.cz": "seznam.cz",
+    "proton mail": "mail.proton.me",
+    "proton calendar": "calendar.proton.me",
+    "messenger": "messenger.com",
+    "facebook": "facebook.com",
+}
+
+_TITLE_SPLIT_RE = re.compile(r"\s+[-—–|]\s+")
+
+
+def condense_title(app, title):
+    """Vrátí zkrácený titulek okna - jen tu část, co reálně nese informaci
+    navíc oproti jménu appky. Prázdný string = nic užitečného k zobrazení."""
+    app_l = (app or "").lower()
+    title = (title or "").strip()
+    if not title:
+        return ""
+
+    if app_l in TERMINAL_APPS:
+        return title  # cesta / běžící program je přesně to, co chceme
+
+    parts = [p.strip() for p in _TITLE_SPLIT_RE.split(title) if p.strip()]
+    if not parts:
+        return title
+
+    if app_l in BROWSER_APPS:
+        # poslední segment je jméno webu ("... - Claude"), jméno prohlížeče zahodit
+        segs = [p for p in parts if p.lower() not in BROWSER_TITLE_NAMES] or parts
+        site = segs[-1]
+        return SITE_DOMAINS.get(site.lower(), site)
+
+    # ostatní appky: první segment (dokument/vault), zbytek je jméno appky a verze
+    first = parts[0]
+    return "" if first.lower() == app_l else first
+
+
 def _node_window_name(node):
     """Jméno appky pro leaf okno (app_id, fallback window_properties.class
     pro xwayland appky, co app_id nenastavují), nebo None když to není leaf
@@ -249,7 +314,7 @@ def _layout_node(node, x, y, w, h, out):
     name = _node_window_name(node)
     if name is not None:
         if name not in COCKPIT_OWN_APP_IDS:
-            out.append({"name": name, "n": (x, y, w, h)})
+            out.append({"name": name, "title": node.get("name") or "", "n": (x, y, w, h)})
         return
 
     tiling = [c for c in node.get("nodes", []) if not _is_cockpit_subtree(c)]
@@ -333,7 +398,8 @@ def get_workspaces_cached():
         _ws_cache["workspaces"] = get_workspaces()
         layout = get_workspace_layout()
         _ws_cache["layout"] = layout
-        _ws_cache["apps"] = {num: [w["name"] for w in data["windows"]] for num, data in layout.items()}
+        _ws_cache["apps"] = {num: [(w["name"], w.get("title", "")) for w in data["windows"]]
+                              for num, data in layout.items()}
         _ws_cache["ts"] = now
     return _ws_cache["workspaces"], _ws_cache["apps"], _ws_cache["layout"]
 
@@ -549,25 +615,58 @@ def scan_desktop_apps():
 
 # ---------- drawing helpers ----------
 
-def draw_box(stdscr, y, x, h, w, focused, title=""):
+def draw_box(stdscr, y, x, h, w, focused, title="", corners_only=False):
+    """corners_only=True nakreslí jen čtyři růžky místo celého rámečku.
+
+    POZOR na per-buňkovou ochranu: dřív byl celý box v JEDNOM try/except a
+    stačilo, aby jedna buňka selhala (klasická ncurses libůstka - do
+    úplně posledního znaku okna, pravý dolní roh, se psát nedá), a except
+    spolkl i všechno ostatní, takže se z boxu nakreslily jen rohy. Každý
+    addch má proto vlastní ochranu - selže nanejvýš ten jeden znak."""
     if h < 2 or w < 2:
         return
     color = curses.color_pair(3) | curses.A_BOLD if focused else curses.color_pair(6)
-    try:
-        stdscr.addch(y, x, curses.ACS_ULCORNER, color)
-        stdscr.addch(y, x + w - 1, curses.ACS_URCORNER, color)
-        stdscr.addch(y + h - 1, x, curses.ACS_LLCORNER, color)
-        stdscr.addch(y + h - 1, x + w - 1, curses.ACS_LRCORNER, color)
+
+    def put(cy, cx, ch):
+        try:
+            stdscr.addch(cy, cx, ch, color)
+        except curses.error:
+            pass
+
+    if corners_only:
+        # délka růžku - u malých boxů kratší, ať se nespojí v celý rámeček
+        n = max(min(w // 6, h // 3, 4), 1)
+        put(y, x, curses.ACS_ULCORNER)
+        put(y, x + w - 1, curses.ACS_URCORNER)
+        put(y + h - 1, x, curses.ACS_LLCORNER)
+        put(y + h - 1, x + w - 1, curses.ACS_LRCORNER)
+        for i in range(1, n):
+            put(y, x + i, curses.ACS_HLINE)
+            put(y, x + w - 1 - i, curses.ACS_HLINE)
+            put(y + h - 1, x + i, curses.ACS_HLINE)
+            put(y + h - 1, x + w - 1 - i, curses.ACS_HLINE)
+        for i in range(1, max(n - 1, 1)):
+            put(y + i, x, curses.ACS_VLINE)
+            put(y + i, x + w - 1, curses.ACS_VLINE)
+            put(y + h - 1 - i, x, curses.ACS_VLINE)
+            put(y + h - 1 - i, x + w - 1, curses.ACS_VLINE)
+    else:
+        put(y, x, curses.ACS_ULCORNER)
+        put(y, x + w - 1, curses.ACS_URCORNER)
+        put(y + h - 1, x, curses.ACS_LLCORNER)
+        put(y + h - 1, x + w - 1, curses.ACS_LRCORNER)
         for i in range(1, w - 1):
-            stdscr.addch(y, x + i, curses.ACS_HLINE, color)
-            stdscr.addch(y + h - 1, x + i, curses.ACS_HLINE, color)
+            put(y, x + i, curses.ACS_HLINE)
+            put(y + h - 1, x + i, curses.ACS_HLINE)
         for i in range(1, h - 1):
-            stdscr.addch(y + i, x, curses.ACS_VLINE, color)
-            stdscr.addch(y + i, x + w - 1, curses.ACS_VLINE, color)
-        if title:
+            put(y + i, x, curses.ACS_VLINE)
+            put(y + i, x + w - 1, curses.ACS_VLINE)
+
+    if title:
+        try:
             stdscr.addstr(y, x + 2, f" {title[:w - 4]} ", color)
-    except curses.error:
-        pass
+        except curses.error:
+            pass
 
 
 def safe_addstr(stdscr, y, x, text, attr=0):
@@ -608,16 +707,17 @@ def best_grid_layout(avail_w, avail_h, count=WS_COUNT):
     return best
 
 
-def draw_workspace_tile(stdscr, num, data, y0, x0, width, height, focused=False):
+def draw_workspace_tile(stdscr, num, data, y0, x0, width, height, focused=False,
+                         corners_only=False):
     """Vykreslí JEDEN workspace (rámeček + okna uvnitř) do zadaného
     obdélníku - čistě z living sway tree dat (žádný screenshot, žádný
     photographer). Okna přicházejí v NORMALIZOVANÝCH souřadnicích 0..1
     (viz get_workspace_layout / _layout_node), takže se sem jen přeškálují
-    na dostupné znakové buňky. Sdílené jádro pro draw_workspace_grid (malá
-    dlaždice) i pro jednotný velký náhled v main() (celá plocha)."""
+    na dostupné znakové buňky. corners_only nakreslí jen růžky místo
+    celého rámečku (velký náhled), okna uvnitř mají rámeček vždy plný."""
     if width < 3 or height < 3:
         return
-    draw_box(stdscr, y0, x0, height, width, focused, str(num))
+    draw_box(stdscr, y0, x0, height, width, focused, str(num), corners_only=corners_only)
 
     inner_w, inner_h = width - 2, height - 2
     windows = data.get("windows") if data else None
@@ -978,7 +1078,11 @@ def render_calendar(stdscr, year, month, day, notes, y0, x0, width, height,
     return panel_y
 
 
-def run_calendar(stdscr, y0, x0, width, height):
+def run_calendar(stdscr, y0, x0, width, height, chrome_draw=None):
+    """chrome_draw(stdscr), pokud je zadaný, se volá KAŽDÝ snímek hned po
+    erase() - potřeba, protože erase() teď čistí celou obrazovku (jinak by
+    tu zůstaly viset zbytky posledního běžného snímku, např. VOL/BRI bary),
+    což by bez tohohle smazalo i jednorázově nakreslený sidebar."""
     today = datetime.date.today()
     year, month, day = today.year, today.month, today.day
     tab_held = False
@@ -987,6 +1091,9 @@ def run_calendar(stdscr, y0, x0, width, height):
     notes_sel = 0
 
     while True:
+        stdscr.erase()  # jinak zůstanou viset zbytky posledního běžného snímku (VOL/BRI bary atd.)
+        if chrome_draw:
+            chrome_draw(stdscr)
         w = width
         selected_key = note_key(year, month, day)
         day_notes = notes.get(selected_key, [])
@@ -1379,6 +1486,9 @@ def _app_icon_placeholder(name):
     return letter, color_idx
 
 
+CLOCK_W = 20  # ukousnutý kus vpravo v launcher stripu na čas + datum
+
+
 def draw_launcher_strip(stdscr, query, results, sel, y0, x0, width, height, active=True):
     """Horizontální strip nad hlavním náhledem + bary - appky zleva doprava,
     každá jako [monogram] Name. Vybraná položka reverzní. Pokud se vybraná
@@ -1386,21 +1496,44 @@ def draw_launcher_strip(stdscr, query, results, sel, y0, x0, width, height, acti
     přepočítá tak, aby začínalo přímo na ní (jednoduchý "snap" scroll bez
     nutnosti držet si offset mezi snímky).
 
+    Vpravo je natrvalo svůj vlastní čtvereček s aktuálním časem/datem,
+    oddělený mezerou od launcheru (ne jen svislá čára uvnitř jednoho boxu) -
+    nezávisí na tom, jestli se zrovna hledá.
+
     Natrvalo rezervovaný prostor (viz main_y0/main_h v main()) - i mimo
     hledání (active=False) se pořád kreslí, jen v klidovém stavu místo
     query/výsledků/hintu ukáže jednu nápovědu, ať náhled+bary neposkakují,
     když se hledání zapne/vypne."""
-    draw_box(stdscr, y0, x0, height, width, active, "Launcher")
+    clock_w = min(CLOCK_W, max(width // 4, 0))
+    has_clock = clock_w >= 8 and height >= 3
+    text_w = width - clock_w - 1 if has_clock else width  # -1 = mezera mezi boxy
+
+    draw_box(stdscr, y0, x0, height, text_w, active, "Launcher")
+
+    if has_clock:
+        clock_x = x0 + text_w + 1
+        draw_box(stdscr, y0, clock_x, height, clock_w, False)
+        now = datetime.datetime.now()
+        time_str = now.strftime("%H:%M")
+        date_str = now.strftime("%a %d.%m.")
+        inner_rows = height - 2
+        row1 = y0 + 1 + max((inner_rows - 2) // 2, 0)
+        row2 = min(row1 + 1, y0 + height - 2)
+        safe_addstr(stdscr, row1, clock_x + max((clock_w - len(time_str)) // 2, 0),
+                    time_str, curses.color_pair(3) | curses.A_BOLD)
+        safe_addstr(stdscr, row2, clock_x + max((clock_w - len(date_str)) // 2, 0),
+                    date_str, curses.color_pair(6))
+
     query_row = y0 + 1
     items_row = y0 + 2
-    avail_w = width - 4
+    avail_w = max(text_w - 4, 0)
 
     if not active:
         idle = "start typing to search apps…"
-        safe_addstr(stdscr, items_row, x0 + width // 2 - len(idle) // 2, idle, curses.color_pair(6))
+        safe_addstr(stdscr, items_row, x0 + text_w // 2 - len(idle) // 2, idle, curses.color_pair(6))
         return
 
-    safe_addstr(stdscr, query_row, x0 + 2, f"> {query}"[:width - 4].ljust(width - 4),
+    safe_addstr(stdscr, query_row, x0 + 2, f"> {query}"[:max(text_w - 4, 0)].ljust(max(text_w - 4, 0)),
                 curses.color_pair(3) | curses.A_BOLD)
 
     if not results:
@@ -1442,29 +1575,90 @@ def draw_launcher_strip(stdscr, query, results, sel, y0, x0, width, height, acti
 
 # ---------- sidebar: workspace boxíky (1-10, vždy všechny) ----------
 
+def _draw_window_line(stdscr, y, x, max_w, app, title, focused):
+    """Jeden řádek "appka <zkrácený titulek>" - jméno appky barevně (stejná
+    barva jako její monogram v launcheru/náhledu), zkrácený titulek tlumeně
+    vedle. Viz condense_title()."""
+    if max_w <= 0:
+        return
+    _letter, color_idx = _app_icon_placeholder(app)
+    app_style = curses.color_pair(3) | curses.A_BOLD if focused else curses.color_pair(color_idx)
+    end = x + max_w
+    chunk = app[:max_w]
+    safe_addstr(stdscr, y, x, chunk, app_style)
+    cx = x + len(chunk)
+
+    detail = condense_title(app, title)
+    if detail and cx + 1 < end:
+        safe_addstr(stdscr, y, cx, f" {detail}"[:end - cx], curses.color_pair(6))
+
+
+def _box_heights(win_counts, avail_h, count):
+    """Kolik řádků dostane který workspace boxík. Každé okno chce vlastní
+    řádek (prázdný workspace jeden na "empty"), plus 2 na rámeček - ale
+    NIKDY se nesmí ukrojit pod 2 viditelné appky (radši žádný "+N more"
+    hint, než jen jedna appka nebo žádná). Když je potřeba ubrat, bere se
+    to OD KONCE (vyšší čísla workspace), ne odshora - workspace 1 zůstává
+    netknutý, dokud je to jen trochu možné. Když se nevejde ani tohle
+    minimum, vrací None jako signál pro kompaktní režim (viz volající)."""
+    min_lines = [min(max(n, 1), 2) for n in win_counts]  # aspoň 2 appky (nebo "empty"), nikdy míň
+    if sum(min_lines) + 2 * count > avail_h:
+        return None
+
+    lines = [max(n, 1) for n in win_counts]
+    for i in range(count - 1, -1, -1):
+        while sum(lines) + 2 * count > avail_h and lines[i] > min_lines[i]:
+            lines[i] -= 1
+    return [n + 2 for n in lines]
+
+
 def draw_workspace_boxes(stdscr, ws_apps, selected_num, y0, x0, width, avail_h, count=WS_COUNT):
-    """count malých boxíků (styl podobný Timer/WiFi/BT boxíkům), jeden na
-    workspace, VŽDY všech count kusů - i prázdné/neexistující, ať je vidět
-    celý přehled najednou bez scrollování. Uvnitř textově, co na tom
-    workspace běží (app_id/class oken). Výška boxíku se počítá z dostupného
-    prostoru; když je místa málo, boxík se zmenší na 2 řádky a název appek
-    se napíše rovnou do titulku (draw_box to umí), místo do content řádku."""
+    """count boxíků (styl podobný Timer/WiFi/BT boxíkům), jeden na workspace,
+    VŽDY všech count kusů - i prázdné, ať je vidět celý přehled najednou bez
+    scrollování. Každé okno na vlastním řádku: appka + její zkrácený titulek
+    (viz condense_title). Výška boxíku se řídí počtem oken (viz _box_heights);
+    když je oken víc, než se vejde, poslední řádek nese "+N"."""
     safe_addstr(stdscr, y0, x0 + 2, "── Workspaces ──"[:width - 4], curses.color_pair(6))
-    top = y0 + 1
-    box_h = max(avail_h // count, 2)
+
+    per_ws = [list(dict.fromkeys(ws_apps.get(i + 1, []))) for i in range(count)]  # dedupe, zachová pořadí
+    heights = _box_heights([len(w) for w in per_ws], avail_h - 1, count)
+
+    # kompaktní nouzový režim na malém terminálu - appky rovnou v titulku boxíku
+    if heights is None:
+        box_h = max((avail_h - 1) // count, 2)
+        for i in range(count):
+            windows = per_ws[i]
+            apps = ", ".join(dict.fromkeys(app for app, _t in windows)) if windows else "empty"
+            draw_box(stdscr, y0 + 1 + i * box_h, x0, box_h, width,
+                     i + 1 == selected_num, f"{i + 1}: {apps}")
+        return
+
+    by = y0 + 1
     for i in range(count):
         num = i + 1
-        by = top + i * box_h
+        box_h = heights[i]
+        rows = box_h - 2
         focused = (num == selected_num)
-        apps = list(dict.fromkeys(ws_apps.get(num, [])))  # dedupe, zachová pořadí
-        text = ", ".join(apps) if apps else "empty"
-        if box_h >= 3:
-            draw_box(stdscr, by, x0, box_h, width, focused, str(num))
-            style = curses.color_pair(3) | curses.A_BOLD if focused else curses.color_pair(1)
-            safe_addstr(stdscr, by + 1, x0 + 2, text[:width - 4], style)
+        windows = per_ws[i]
+        draw_box(stdscr, by, x0, box_h, width, focused, str(num))
+
+        if not windows:
+            safe_addstr(stdscr, by + 1, x0 + 2, "empty", curses.color_pair(6))
         else:
-            title = f"{num}: {text}"
-            draw_box(stdscr, by, x0, box_h, width, focused, title)
+            if len(windows) <= rows:
+                shown = windows
+            elif rows >= 3:
+                shown = windows[:rows - 1]  # poslední řádek "+N more"
+            else:
+                # rows==2 (minimum) - dvě reálné appky mají přednost před
+                # "+N more" hintem, ten by tu jednu z nich jen vytlačil
+                shown = windows[:rows]
+            for n, (app, title) in enumerate(shown):
+                _draw_window_line(stdscr, by + 1 + n, x0 + 2, width - 4, app, title, focused)
+            if len(shown) < len(windows) and len(shown) < rows:
+                more = f"+{len(windows) - len(shown)} more"
+                safe_addstr(stdscr, by + 1 + len(shown), x0 + 2, more[:width - 4], curses.color_pair(6))
+        by += box_h
 
 
 # ---------- sidebar ----------
@@ -1617,7 +1811,7 @@ def main(stdscr):
     all_apps = scan_desktop_apps()
     timer_values = [0, 0, 0]
     timer_field = 0
-    WEATHER_STRIP_H = 12
+    WEATHER_STRIP_H = 10
 
     # Launcher normálně vůbec není vidět - žádná položka v sidebar_items,
     # žádné Tab cyklení. Objeví se, jakmile se začne psát cokoliv
@@ -1643,9 +1837,11 @@ def main(stdscr):
         preview_w = main_pane_w - VBARS_W - 1  # -1 = mezera mezi náhledem a bary
         vbars_x = cx0 + preview_w + 1
         strip_y = cy0 + cheight
-        cal_w = (cwidth - 1) * 2 // 5  # poměr 2:3 kalendář:weather
+        # spodní pruh sahá na stejný pravý okraj jako náhled+bary nad ním
+        # (main_pane_w, ne cwidth), ať weather končí přesně v rohu obrazovky
+        cal_w = (main_pane_w - 1) * 2 // 5  # poměr 2:3 kalendář:weather
         weather_x = cx0 + cal_w + 1
-        weather_w = cwidth - cal_w - 1
+        weather_w = main_pane_w - cal_w - 1
 
         # Launcher je horizontální strip NAD náhledem+bary - natrvalo
         # rezervovaný (ne jen když se zrovna píše), ať se náhled/bary
@@ -1665,7 +1861,6 @@ def main(stdscr):
         # nanejvýš by se ten jeden roh nedokreslil.
         draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
                      timer_values, timer_field, ws_apps, focused=True)
-        draw_box(stdscr, 0, side_w, h, w - side_w, False)
         today = datetime.date.today()
         render_calendar_strip(stdscr, today.year, today.month, today.day, load_notes_cached(),
                                strip_y, cx0, cal_w, WEATHER_STRIP_H)
@@ -1680,7 +1875,8 @@ def main(stdscr):
         # pro workspace čistě z living sway tree dat (draw_workspace_tile,
         # žádný screenshot/photographer), pro Power classic textový preview.
         if kind == "workspace":
-            draw_workspace_tile(stdscr, item_id, ws_layout.get(item_id), main_y0, cx0, preview_w, main_h)
+            draw_workspace_tile(stdscr, item_id, ws_layout.get(item_id), main_y0, cx0, preview_w, main_h,
+                                 corners_only=True)
         elif kind == "power":
             draw_power_preview(stdscr, item_id, main_y0, cx0, preview_w, main_h)
         # wifi/bt/timer: stav a ovládání se dějí přímo v pinnutém boxíku v sidebaru
@@ -1703,12 +1899,10 @@ def main(stdscr):
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
         if key == CALENDAR_KEY:
-            draw_sidebar(stdscr, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
-                         timer_values, timer_field, ws_apps, focused=False)
-            draw_box(stdscr, 0, side_w, h, w - side_w, True)
-            stdscr.refresh()
             _kitty_clear_placements()  # run_calendar má vlastní smyčku - hlavní tik, co jinak čistí staré thumbnaily, se dokud běží vůbec nezavolá
-            run_calendar(stdscr, cy0, cx0, cwidth, cheight)
+            run_calendar(stdscr, cy0, cx0, cwidth, cheight, chrome_draw=lambda s: draw_sidebar(
+                s, sidebar_items, sel_side, 0, 0, side_w, h, power_start,
+                timer_values, timer_field, ws_apps, focused=False))
             continue
 
         # "start typing" - libovolné tisknutelné písmeno kdekoliv v dashboardu

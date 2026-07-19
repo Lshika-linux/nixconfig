@@ -30,7 +30,8 @@
 	  bindsym --to-code Mod4+Shift+8 move container to workspace number 8
 	  bindsym --to-code Mod4+Shift+9 move container to workspace number 9
 	  bindsym --to-code Mod4+Shift+0 move container to workspace number 10
-	  # --- swayfx ---
+
+      # --- swayfx ---
 	  corner_radius 8
 	  blur enable
 	  blur_xray disable
@@ -40,6 +41,7 @@
 	  shadows enable
 	  shadow_blur_radius 20
 	  shadow_color #00000070
+	  # ANIMACE NEJDOU, JE POTŘEBA VÍC PRÁCE NEŽ JEN NAPSAT SEM :c 
 	'';
 	
     config = {
