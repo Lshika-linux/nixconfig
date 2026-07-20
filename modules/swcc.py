@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-cockpit_dashboard.py - fullscreen system dashboard (Win+grave).
+swcc_dashboard.py - fullscreen system controlcenter (Win+Tab).
 
 Layout:
   - Left sidebar (~1/5 width): workspace boxes 1-10 (always all of them,
@@ -49,7 +49,7 @@ import threading
 import time
 import re
 
-from cockpit_common import query_daemon
+from swcc_common import query_daemon
 
 HOME = os.path.expanduser("~")
 SCRIPTS = os.path.join(HOME, "scripts_sway")
@@ -61,8 +61,8 @@ WS_COUNT = 10  # sway workspaces 1-10 - the sidebar ALWAYS shows all of them, ev
 # workspace", otherwise the workspace the dashboard is currently open on
 # would tautologically report "CockpitDashboard" instead of the real
 # content underneath it.
-COCKPIT_OWN_APP_IDS = {
-    "CockpitDashboard", "WindowSwitcher", "Connectivity", "Weather",
+CC_OWN_APP_IDS = {
+    "SwayControlCenter", "WindowSwitcher", "Connectivity", "Weather",
     "TimerPicker", "StickyTimer", "Calendar", "PowerMenu", "AppLauncher",
     "FloatingCenter",
 }
@@ -307,40 +307,40 @@ def _node_window_name(node):
     return node.get("app_id") or (node.get("window_properties") or {}).get("class")
 
 
-def _is_cockpit_subtree(node):
+def _is_cc_subtree(node):
     """True if this subtree contains NO windows other than cockpit's own -
     such a node gets dropped entirely when reconstructing the layout (see
     _layout_node)."""
     name = _node_window_name(node)
     if name is not None:
-        return name in COCKPIT_OWN_APP_IDS
+        return name in CC_OWN_APP_IDS
     children = node.get("nodes", []) + node.get("floating_nodes", [])
     if not children:
         return True
-    return all(_is_cockpit_subtree(c) for c in children)
+    return all(_is_cc_subtree(c) for c in children)
 
 
 def _layout_node(node, x, y, w, h, out):
     """Reconstructs the layout from the STRUCTURE of the sway tree into
     normalized 0..1 coordinates, instead of from absolute rects.
 
-    This is what elegantly handles the fact that the cockpit dashboard
+    This is what elegantly handles the fact that the commandcenter
     itself is just another sibling in a tiling split (fullscreen is a
     display mode, not a layout change), so it keeps holding its slot even
     once we filter it out of the listing. Instead of patching absolute
     coordinates after the fact, we just DROP that node and redistribute its
     share across the remaining siblings proportionally to their size -
     exactly what sway would do if that window were closed. The result is
-    consistent no matter where in the split cockpit sat, or whether it's
+    consistent no matter where in the split cc sat, or whether it's
     even present on that workspace at all."""
     name = _node_window_name(node)
     if name is not None:
-        if name not in COCKPIT_OWN_APP_IDS:
+        if name not in CC_OWN_APP_IDS:
             out.append({"name": name, "title": node.get("name") or "", "n": (x, y, w, h)})
         return
 
-    tiling = [c for c in node.get("nodes", []) if not _is_cockpit_subtree(c)]
-    floating = [c for c in node.get("floating_nodes", []) if not _is_cockpit_subtree(c)]
+    tiling = [c for c in node.get("nodes", []) if not _is_cc_subtree(c)]
+    floating = [c for c in node.get("floating_nodes", []) if not _is_cc_subtree(c)]
 
     if tiling:
         layout = node.get("layout", "splith")
@@ -467,7 +467,7 @@ def _kitty_clear_placements():
 
 def close_self():
     """Proactively kills our own kitty window via swaymsg - the SAME
-    mechanism cockpit_dashboard_toggle.sh already uses for manual closing
+    mechanism swcc_toggle.sh already uses for manual closing
     (pressing Win+grave a second time), so we know it's reliable and fast.
 
     Why a plain `return` and letting the process exit naturally isn't
@@ -482,7 +482,7 @@ def close_self():
     process-exits -> kitty-closes-window -> sway-notices) removes the
     dashboard from the screen instantly, no matter how long the app takes
     to start."""
-    subprocess.run(["swaymsg", '[app_id="CockpitDashboard"] kill'],
+    subprocess.run(["swaymsg", '[app_id="SwayControlCenter"] kill'],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -1679,7 +1679,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
 
     wifi_focused = selected == wifi_idx
     wifi_data = get_wifi_info()
-    wifi_title = "WiFi  ^W manager" if wifi_focused else "WiFi"
+    wifi_title = "WiFi  ^W impala" if wifi_focused else "WiFi"
     draw_box(stdscr, wifi_box_y, x0, CONN_BOX_H, width, wifi_focused, wifi_title)
     wifi_status, wifi_msg = _conn_status_line(_wifi_conn_state)
     if wifi_status:
@@ -1704,7 +1704,7 @@ def draw_sidebar(stdscr, items, selected, y0, x0, width, height, power_start,
 
     bt_focused = selected == bt_idx
     bt_data = get_bt_info()
-    bt_title = "Bluetooth  ^B manager" if bt_focused else "Bluetooth"
+    bt_title = "Bluetooth  ^B bluetuith" if bt_focused else "Bluetooth"
     draw_box(stdscr, bt_box_y, x0, CONN_BOX_H, width, bt_focused, bt_title)
     bt_status, bt_msg = _conn_status_line(_bt_conn_state)
     if bt_status:

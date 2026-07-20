@@ -220,24 +220,24 @@ for i in inputs:
   '';
 };
 
-home.file."scripts_sway/cockpit_daemon.py" = {
+home.file."scripts_sway/swccd.py" = {
   executable = true;
-  source = ../modules/cockpit_daemon.py;
+  source = ../modules/swccd.py;
 };
 
-home.file."scripts_sway/cockpit_common.py" = {
+home.file."scripts_sway/swcc_common.py" = {
   executable = true;
-  source = ../modules/cockpit_common.py;
+  source = ../modules/swcc_common.py;
 };
 
-systemd.user.services.cockpit-daemon = {
+systemd.user.services.swccd = {
   Unit = {
-    Description = "Cockpit TUI data daemon (wifi/bt/weather cache)";
+    Description = "ControlCenter TUI data daemon (wifi/bt/weather cache)";
     After = [ "graphical-session.target" ];
     PartOf = [ "graphical-session.target" ];
   };
   Service = {
-    ExecStart = "${pkgs.python3}/bin/python3 %h/scripts_sway/cockpit_daemon.py";
+    ExecStart = "${pkgs.python3}/bin/python3 %h/scripts_sway/swccd.py";
     Restart = "on-failure";
     RestartSec = 2;
   };
@@ -246,14 +246,14 @@ systemd.user.services.cockpit-daemon = {
   };
 };
 
-home.file."scripts_sway/cockpit_dashboard.py" = {
+home.file."scripts_sway/swcc.py" = {
   executable = true;
-  source = ../modules/cockpit_dashboard.py;
+  source = ../modules/swcc.py;
 };
 
-home.file."scripts_sway/cockpit_dashboard_toggle.sh" = {
+home.file."scripts_sway/swcc_toggle.sh" = {
   executable = true;
-  source = ../modules/cockpit_dashboard_toggle.sh;
+  source = ../modules/swcc_toggle.sh;
 };
 
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-cockpit_common.py — sdílená helper funkce pro widgety, co chtějí číst
-data z cockpit_daemon.py místo přímého fetche.
+swcc_common.py — sdílená helper funkce pro widgety, co chtějí číst
+data z swccd.py místo přímého fetche.
 
 Použití ve widgetu:
-    from cockpit_common import query_daemon
+    from swcc_common import query_daemon
 
     def get_weather():
         cached = query_daemon("weather")
@@ -17,11 +17,11 @@ import socket
 import os
 import json
 
-SOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "cockpit.sock")
+SOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "swcc.sock")
 
 
 def query_daemon(key, timeout=0.5):
-    """Zeptá se cockpit_daemon.py na klíč ('weather' | 'wifi' | 'bt' | 'all').
+    """Zeptá se swccd.py na klíč ('weather' | 'wifi' | 'bt' | 'all').
     Vrací parsovaný JSON, nebo None pokud daemon neběží / neodpoví včas."""
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

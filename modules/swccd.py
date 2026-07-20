@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-cockpit_daemon.py — background data cache for the cockpit TUI widgets.
+swcc_daemon.py — background data cache for the commandcenter TUI widgets.
 
 Holds wifi / bluetooth / weather state in memory, refreshed on separate
 intervals, and serves it over a unix socket so widgets open instantly
@@ -17,7 +17,7 @@ import json
 import time
 import os
 
-SOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "cockpit.sock")
+SOCK_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "swcc.sock")
 
 WEATHER_INTERVAL = 900   # 15 min
 CONN_INTERVAL = 10       # 10s

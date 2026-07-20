@@ -111,23 +111,8 @@
 	    { command = "floating enable, border none, move position center, opacity 0.9"; criteria = { class = "Wlogout"; }; }
 	    { command = "floating enable, border none, fullscreen enable"; criteria = { instance = "floating_impala"; }; }
 	    { command = "fullscreen enable"; criteria = { class = "FloatingTerminal"; }; }
-		{ command = "fullscreen enable"; criteria = { app_id = "CockpitDashboard"; }; }
-	 
-		# TOP ROW
-			    { command = "floating enable, resize set 557 367, move position 12 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "WindowSwitcher"; }; }
-			    { command = "floating enable, resize set 692 212, move position 618 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "Connectivity"; }; }
-			    { command = "floating enable, resize set 557 367, move position 1337 21, border pixel 2, dim_inactive 0"; criteria = { app_id = "Weather"; }; }
-			 
-			   # RIGHT COLUMN
-			    { command = "floating enable, sticky enable, resize set 326 81, move position 1580 439, border pixel 2, dim_inactive 0"; criteria = { app_id = "StickyTimer"; }; }
-			    { command = "floating enable, resize set 292 199, move position 1610 552, border pixel 2, dim_inactive 0"; criteria = { app_id = "TimerPicker"; }; }
-			    { command = "floating enable, resize set 287 271, move position 1617 769, border pixel 2, dim_inactive 0"; criteria = { app_id = "Calendar"; }; }
-			 
-			   # LEFT COLUMN
-			    { command = "floating enable, resize set 287 188, move position 18 405, border pixel 2, dim_inactive 0"; criteria = { app_id = "PowerMenu"; }; }
-			    { command = "floating enable, resize set 287 394, move position 18 622, border pixel 2, dim_inactive 0"; criteria = { app_id = "AppLauncher"; }; }
-			 
-			    { command = "floating enable, resize set 700 500, move position center, border pixel 2, dim_inactive 0"; criteria = { app_id = "FloatingCenter"; }; }
+		{ command = "fullscreen enable, opacity 0.8"; criteria = { app_id = "SwayControlCenter"; }; }
+		{ command = "floating enable, sticky enable, resize set 326 81, move position 1580 439, border pixel 2, dim_inactive 0"; criteria = { app_id = "StickyTimer"; }; }
 	  ];
 
       keybindings = let 
@@ -137,37 +122,21 @@
         "${mod}+Shift+q" = "kill";
         "${mod}+Shift+c" = "reload";
         "${mod}+Shift+r" = "restart";
-		"${mod}+Shift+e" = "exec kitty --class PowerMenu -e python3 ~/scripts_sway/powermenu.py";		
         "${mod}+Shift+x" = "exec ~/scripts_sway/lock.sh";
-        "${mod}+Shift+S" = "exec alacritty -e ssh ratta@100.97.214.64";
+        "${mod}+Shift+S" = "exec kitty -e ssh ratta@100.97.214.64";
 
         # Skripty a vyhledávací menu
 #        "${mod}+d" = "exec rofi -show drun";
-		"${mod}+d" = "exec kitty --class AppLauncher -e python3 ~/scripts_sway/launcher.py";
         "${mod}+g" = "exec ~/scripts_sway/websearch.sh";
-		"${mod}+t" = "exec kitty --class TimerPicker --override font_size=14 -e python3 ~/scripts_sway/timer.py";
-		"${mod}+Tab" = "exec kitty --class WindowSwitcher -e python3 ~/scripts_sway/switcher.py";			
-		"${mod}+c" = "exec kitty --class Connectivity -e python3 ~/scripts_sway/connectivity.py";
-		"${mod}+n" = "exec kitty --class Calendar -e python3 ~/scripts_sway/raficalendar.py";
-		"${mod}+p" = "exec kitty --class Weather -e python3 ~/scripts_sway/weather.py";
-#		"${mod}+grave" = "exec python3 ~/scripts_sway/cockpit_client.py";
-		"${mod}+grave" = "exec ~/scripts_sway/cockpit_dashboard_toggle.sh";
+		"${mod}+Tab" = "exec ~/scripts_sway/swcc_toggle.sh";
 
-        # Pohyb a zaměření oken (i3 styl + 'uring')
-        "${mod}+j" = "focus left";
-        "${mod}+k" = "focus down";
-        "${mod}+l" = "focus up";
-        "${mod}+odiaeresis" = "focus right"; # ů klávesa na CZ layoutu
+        # Pohyb a zaměření oken 
         "${mod}+Left" = "focus left";
         "${mod}+Down" = "focus down";
         "${mod}+Up" = "focus up";
         "${mod}+Right" = "focus right";
 
         # Přesun kontejnerů
-        "${mod}+Shift+j" = "move left";
-        "${mod}+Shift+k" = "move down";
-        "${mod}+Shift+l" = "move up";
-        "${mod}+Shift+odiaeresis" = "move right"; # ů klávesa na CZ layoutu
         "${mod}+Shift+Left" = "move left";
         "${mod}+Shift+Down" = "move down";
         "${mod}+Shift+Up" = "move up";
