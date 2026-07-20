@@ -35,8 +35,33 @@
   networking.networkmanager.enable = false;
   networking.useDHCP = false;
 
-  # ..so tailscale doesnt shit itself (split DNS: *.ts.net -> MagicDNS, rest -> router)
-  services.resolved.enable = true;
+  # ..so tailscale doesnt shit itself (split DNS: *.ts.net -> MagicDNS, rest -> Quad9)
+  services.resolved = {
+    enable = true;
+
+    settings.Resolve = {
+      # Quad9 blokuje známé malware/phishing domény přímo na DNS úrovni.
+      # #hostname NENÍ komentář - ověřuje se proti němu TLS certifikát!
+      DNS = [
+        "9.9.9.9#dns.quad9.net"
+        "149.112.112.112#dns.quad9.net"
+      ];
+      FallbackDNS = [
+        "9.9.9.9#dns.quad9.net"
+        "149.112.112.112#dns.quad9.net"
+        "2620:fe::fe#dns.quad9.net"
+      ];
+
+      # "~." = routovací doména pro VŠECHNO. Přebije DNS z DHCP,
+      # takže cizí router (kavárna, hotel) nemůže unést naše dotazy.
+      Domains = [ "~." ];
+
+      DNSOverTLS = "true";
+      DNSSEC = "allow-downgrade";
+      LLMNR = "false";        # LLMNR poisoning je standardní pentest krok
+      MulticastDNS = "no";
+    };
+  };
 
   # Sets the timezone
   time.timeZone = "Europe/Prague";
